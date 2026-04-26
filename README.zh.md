@@ -18,7 +18,7 @@
 
 ## 前置要求
 
-- `curl`、`jq`、`python3`、`perl`、`uuidgen`
+- `curl`、`jq`
 - 需要网络访问已配置 Obsidian LiveSync 的 CouchDB 实例
 
 ## 配置

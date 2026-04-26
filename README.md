@@ -18,7 +18,7 @@ All commands produce **JSON output** with a unified `success` field.
 
 ## Prerequisites
 
-- `curl`, `jq`, `python3`, `perl`, `uuidgen`
+- `curl`, `jq`
 - Network access to a CouchDB instance with Obsidian LiveSync configured
 
 ## Configuration

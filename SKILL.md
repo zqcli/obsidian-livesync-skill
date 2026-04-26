@@ -9,7 +9,7 @@ description: >
   and leaf node cleanup on purge.
 license: MIT
 compatibility: >
-  Requires curl, jq, python3, perl, and uuidgen. Needs network access to a
+  Requires curl and jq. Needs network access to a
   CouchDB instance with Obsidian LiveSync configured.
 metadata:
   author: https://github.com/zqcli
