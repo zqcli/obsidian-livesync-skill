@@ -1,6 +1,6 @@
-[English](README.md) | [中文](README.zh.md)
-
 # Obsidian LiveSync CouchDB CRUD Skill
+
+[English](README.md) | [中文](README.zh.md)
 
 A Copilot Skill that provides atomic CRUD operations on an Obsidian LiveSync CouchDB database. Create, read, update, and delete Markdown documents in your Obsidian vault **without having Obsidian installed**, fully compatible with the LiveSync plugin (no sync errors).
 
