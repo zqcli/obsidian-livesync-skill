@@ -2,7 +2,9 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-A Copilot Skill that provides atomic CRUD operations on an Obsidian LiveSync CouchDB database. Create, read, update, and delete Markdown documents in your Obsidian vault **without having Obsidian installed**, fully compatible with the LiveSync plugin (no sync errors).
+An [Agent Skill](https://agentskills.io/) that provides atomic CRUD operations on an Obsidian LiveSync CouchDB database. Create, read, update, and delete Markdown documents in your Obsidian vault **without having Obsidian installed**, fully compatible with the LiveSync plugin (no sync errors).
+
+This skill follows the open [Agent Skills](https://agentskills.io/) standard — a lightweight, portable format for extending AI agent capabilities. It works with any skills-compatible agent client, including Claude Code, GitHub Copilot, Gemini CLI, Roo Code, and [more](https://agentskills.io/clients).
 
 ## Features
 

@@ -2,7 +2,9 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-一个 Copilot Skill，提供对 Obsidian LiveSync CouchDB 数据库的原子 CRUD 操作。**无需安装 Obsidian 客户端**即可创建、读取、更新和删除 vault 中的 Markdown 文档，与 LiveSync 插件完全兼容（不会产生同步错误）。
+一个符合 [Agent Skills](https://agentskills.io/) 开放标准的 Skill，提供对 Obsidian LiveSync CouchDB 数据库的原子 CRUD 操作。**无需安装 Obsidian 客户端**即可创建、读取、更新和删除 vault 中的 Markdown 文档，与 LiveSync 插件完全兼容（不会产生同步错误）。
+
+本 Skill 遵循 [Agent Skills](https://agentskills.io/) 开放标准——一种轻量级、可移植的 AI 智能体能力扩展格式。可与任何支持该标准的智能体客户端配合使用，包括 Claude Code、GitHub Copilot、Gemini CLI、Roo Code 等（[查看完整列表](https://agentskills.io/clients)）。
 
 ## 功能
 
