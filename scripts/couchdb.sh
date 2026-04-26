@@ -22,7 +22,7 @@ COMMAND=""
 
 check_dependencies() {
   local missing=()
-  for cmd in curl jq python3 perl uuidgen; do
+  for cmd in curl jq; do
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
   done
   if [[ ${#missing[@]} -gt 0 ]]; then
@@ -57,7 +57,7 @@ check_doc_exists() {
   local base_url="$1" doc_id="$2" username="$3" password="$4"
   local doc_id_lower=$(echo "$doc_id" | tr '[:upper:]' '[:lower:]')
   local keys_json=$(jq -c -n --arg key "$doc_id_lower" '[$key]')
-  local encoded_keys=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=""))' "$keys_json")
+  local encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
   local result=$(_curl -u "${username}:${password}" \
     "${base_url}/_all_docs?keys=${encoded_keys}" 2>&1)
   if echo "$result" | jq -e '.rows[0].error' >/dev/null 2>&1; then
@@ -70,7 +70,7 @@ check_doc_exists() {
 curl_get_doc() {
   local base_url="$1" doc_id="$2" username="$3" password="$4"
   local keys_json=$(jq -c -n --arg key "$doc_id" '[$key]')
-  local encoded_keys=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=""))' "$keys_json")
+  local encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
   local result=$(_curl -u "${username}:${password}" \
     "${base_url}/_all_docs?include_docs=true&keys=${encoded_keys}" 2>&1)
   if echo "$result" | jq -e '.rows[0].doc' >/dev/null 2>&1; then
@@ -105,8 +105,8 @@ curl_list_dir() {
   local prefix=$(echo "$2" | tr '[:upper:]' '[:lower:]' | sed 's|/$||')
   local startkey=$(jq -n --arg p "${prefix}/" '$p')
   local endkey=$(jq -n --arg p "${prefix}/" '$p + "\uffff"')
-  local enc_start=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=""))' "$startkey")
-  local enc_end=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=""))' "$endkey")
+  local enc_start=$(jq -rn --arg v "$startkey" '$v|@uri')
+  local enc_end=$(jq -rn --arg v "$endkey" '$v|@uri')
   _curl -u "${3}:${4}" "${1}/_all_docs?startkey=${enc_start}&endkey=${enc_end}" 2>&1
 }
 
@@ -126,7 +126,7 @@ curl_delete_doc_soft() {
 curl_delete_doc_purge() {
   local base_url="$1" doc_id="$2" rev="$3" username="$4" password="$5"
   # Get all leaf revisions (including conflicts) to purge completely
-  local encoded_id=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=""))' "$doc_id")
+  local encoded_id=$(jq -rn --arg v "$doc_id" '$v|@uri')
   local doc_info=$(_curl -u "${username}:${password}" \
     "${base_url}/${encoded_id}?conflicts=true" 2>&1)
   local all_revs
@@ -159,7 +159,7 @@ curl_delete_node() {
 # =============================================================================
 
 generate_node_id() {
-  echo "h:$(uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '-' | cut -c1-13)"
+  echo "h:$(LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c 13)"
 }
 
 # =============================================================================
@@ -179,7 +179,7 @@ validate_content_size() {
 }
 
 calculate_size_for_livesync() {
-  printf '%s' "$1" | perl -0777 -pe 's/\n+$//' | wc -c | tr -d ' '
+  printf '%s' "$1" | jq -sRj 'sub("\n+$";"")' | wc -c | tr -d ' '
 }
 
 read_file_content() {
@@ -269,7 +269,7 @@ format_changes_result() {
 resolve_latest_rev() {
   local base_url="$1" doc_id="$2" username="$3" password="$4"
   local keys_json=$(jq -c -n --arg key "$doc_id" '[$key]')
-  local encoded_keys=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=""))' "$keys_json")
+  local encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
   local result=$(_curl -u "${username}:${password}" "${base_url}/_all_docs?keys=${encoded_keys}" 2>&1)
   if echo "$result" | jq -e '.rows[0].value.rev' >/dev/null 2>&1; then
     echo "$result" | jq -r '.rows[0].value.rev'
@@ -281,7 +281,7 @@ resolve_latest_rev() {
 build_doc_json_for_insert() {
   local doc_id="$1" node_id="$2" timestamp="$3" content="$4"
   local id_lower=$(echo "$doc_id" | tr '[:upper:]' '[:lower:]')
-  local size=$(printf '%s' "$content" | perl -pe 'chomp if eof' | wc -c | tr -d ' ')
+  local size=$(printf '%s' "$content" | jq -sRj 'sub("\n$";"")' | wc -c | tr -d ' ')
   local children=$(jq -c -n --arg n "$node_id" '[$n]')
   jq -c -n --arg id "$id_lower" --arg path "$doc_id" --argjson children "$children" \
     --arg ctime "$timestamp" --arg mtime "$timestamp" --arg size "$size" \
@@ -544,6 +544,10 @@ validate_connection() {
   # Support env vars as fallback for credentials
   [[ -z "${USERNAME:-}" && -n "${COUCHDB_USER:-}" ]] && USERNAME="$COUCHDB_USER"
   [[ -z "${PASSWORD:-}" && -n "${COUCHDB_PASSWORD:-}" ]] && PASSWORD="$COUCHDB_PASSWORD"
+  # CLI --host overrides env var; store into DEFAULT_HOST so build_base_url works
+  [[ -n "${HOST:-}" ]] && DEFAULT_HOST="$HOST"
+  [[ -n "${HIDDEN_PATH:-}" ]] && DEFAULT_PATH="$HIDDEN_PATH"
+  [[ -n "${DATABASE:-}" ]] && DEFAULT_DATABASE="$DATABASE"
   [[ -n "${USERNAME:-}" && -n "${PASSWORD:-}" ]] || \
     { echo '{"success":false,"error":"missing_auth","reason":"Provide --user/--password or set COUCHDB_USER/COUCHDB_PASSWORD env vars"}'; return 1; }
   [[ -n "${DEFAULT_HOST:-}" ]] || \
