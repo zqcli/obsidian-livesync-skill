@@ -244,14 +244,22 @@ parse_response() {
 resolve_full_content() {
   local doc_json="$1" base_url="$2" username="$3" password="$4"
   local children=$(echo "$doc_json" | jq -r '.children[]? // empty')
-  [[ -z "$children" ]] && { echo "$doc_json" | jq -r '.data // empty'; return; }
-  # Build keys array and fetch all leaf nodes in a single bulk query
+  if [[ -z "$children" ]]; then
+    local raw=$(echo "$doc_json" | jq -r '.data // empty')
+    raw="${raw//\\n/$'\n'}"
+    raw="${raw//$'\r'/}"
+    printf '%s' "$raw"
+    return
+  fi
   local keys_json=$(echo "$children" | jq -R . | jq -s .)
   local encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
   local result
   result=$(_curl -u "${username}:${password}" \
     "${base_url}/_all_docs?include_docs=true&keys=${encoded_keys}") || return 1
-  echo "$result" | jq -r '[.rows[].doc.data // empty] | join("")'
+  local raw=$(echo "$result" | jq -r '[.rows[].doc.data // empty] | join("")')
+  raw="${raw//\\n/$'\n'}"
+  raw="${raw//$'\r'/}"
+  printf '%s' "$raw"
 }
 
 format_select_result() {
@@ -338,6 +346,7 @@ replace_section() {
 
   local before="" after="" found=false in_section=false
   while IFS= read -r line; do
+    line="${line%$'\r'}"
     if [[ "$line" =~ ^(#{1,6})[[:space:]] ]]; then
       local cur_level=${#BASH_REMATCH[1]}
       # End section when hitting a header of same or higher level
