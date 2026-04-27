@@ -5,11 +5,12 @@ set -euo pipefail
 # Obsidian LiveSync CouchDB CRUD Tool
 # =============================================================================
 
-DEFAULT_HOST="${COUCHDB_HOST:-}"
-DEFAULT_PATH="${COUCHDB_PATH:-}"
-DEFAULT_DATABASE="${COUCHDB_DATABASE:-}"
+DEFAULT_HOST="${COUCHDB_HOST:-}"        # env var fallback for --host
+DEFAULT_PATH="${COUCHDB_PATH:-}"        # env var fallback for --path
+DEFAULT_DATABASE="${COUCHDB_DATABASE:-}" # env var fallback for --database
 MAX_RETRIES=3
 
+# CLI-parsed values (override env vars when provided)
 HOST="" HIDDEN_PATH="" USERNAME="" PASSWORD="" DATABASE=""
 DOC_ID="" FILE_PATH="" CONTENT="" LIST_DIR="" CHANGES_LIMIT=""
 APPEND_MODE=false REPLACE_SECTION="" PURGE_MODE=false DELETE_DIR=""
@@ -110,7 +111,7 @@ curl_get_doc() {
   if echo "$result" | jq -e '.rows[0].doc' >/dev/null 2>&1; then
     echo "$result" | jq '.rows[0].doc'
   elif echo "$result" | jq -e '.rows[0].error' >/dev/null 2>&1; then
-    echo "$result" | jq '{error: .rows[0].error, reason: .rows[0].reason}'
+    echo "$result" | jq -c '{success:false, error:.rows[0].error, reason:(.rows[0].reason // null)}'
   else
     echo "$result"
   fi
@@ -164,7 +165,7 @@ curl_delete_doc_purge() {
   encoded_id=$(jq -rn --arg v "$doc_id" '$v|@uri')
   local doc_info
   doc_info=$(_curl -u "${username}:${password}" \
-    "${base_url}/${encoded_id}?conflicts=true" 2>&1) || return 1
+    "${base_url}/${encoded_id}?conflicts=true") || return 1
   local all_revs
   if echo "$doc_info" | jq -e '._conflicts' >/dev/null 2>&1; then
     all_revs=$(echo "$doc_info" | jq -c '[._rev] + ._conflicts')
@@ -175,7 +176,7 @@ curl_delete_doc_purge() {
   purge_json=$(jq -c -n --arg id "$doc_id" --argjson revs "$all_revs" '{($id): $revs}')
   local purge_result
   purge_result=$(_curl -u "${username}:${password}" -X POST -H 'Content-Type: application/json' \
-    -d "$purge_json" "${base_url}/_purge" 2>&1) || return 1
+    -d "$purge_json" "${base_url}/_purge") || return 1
   if echo "$purge_result" | jq -e '.purged' >/dev/null 2>&1; then
     echo "$purge_result" | jq -c --arg id "$doc_id" '{success:true, id:$id, purged:true}'
   else
@@ -198,7 +199,12 @@ curl_delete_node() {
 # =============================================================================
 
 generate_node_id() {
-  echo "h:$(LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c 13)"
+  local id
+  id=$(LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c 13)
+  while [[ ${#id} -lt 13 ]]; do
+    id+=$(LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c $((13 - ${#id})))
+  done
+  echo "h:${id}"
 }
 
 # =============================================================================
@@ -253,14 +259,19 @@ parse_response() {
   fi
 }
 
+decode_content_newlines() {
+  local raw="$1"
+  raw="${raw//\\n/$'\n'}"
+  raw="${raw//$'\r'/}"
+  printf '%s' "$raw"
+}
+
 resolve_full_content() {
   local doc_json="$1" base_url="$2" username="$3" password="$4"
   local children=$(echo "$doc_json" | jq -r '.children[]? // empty')
   if [[ -z "$children" ]]; then
     local raw=$(echo "$doc_json" | jq -r '.data // empty')
-    raw="${raw//\\n/$'\n'}"
-    raw="${raw//$'\r'/}"
-    printf '%s' "$raw"
+    decode_content_newlines "$raw"
     return
   fi
   local keys_json=$(echo "$children" | jq -R . | jq -s .)
@@ -269,9 +280,7 @@ resolve_full_content() {
   result=$(_curl -u "${username}:${password}" \
     "${base_url}/_all_docs?include_docs=true&keys=${encoded_keys}") || return 1
   local raw=$(echo "$result" | jq -r '[.rows[].doc.data // empty] | join("")')
-  raw="${raw//\\n/$'\n'}"
-  raw="${raw//$'\r'/}"
-  printf '%s' "$raw"
+  decode_content_newlines "$raw"
 }
 
 format_select_result() {
@@ -601,20 +610,28 @@ cmd_delete() {
 # CLI
 # =============================================================================
 
-validate_connection() {
-  # Support env vars as fallback for credentials
+merge_config() {
+  # Merge env vars as fallback for CLI flags
   [[ -z "${USERNAME:-}" && -n "${COUCHDB_USER:-}" ]] && USERNAME="$COUCHDB_USER"
   [[ -z "${PASSWORD:-}" && -n "${COUCHDB_PASSWORD:-}" ]] && PASSWORD="$COUCHDB_PASSWORD"
-  # CLI --host overrides env var; store into DEFAULT_HOST so build_base_url works
+  # CLI --host/--path/--database override env vars
   [[ -n "${HOST:-}" ]] && DEFAULT_HOST="$HOST"
   [[ -n "${HIDDEN_PATH:-}" ]] && DEFAULT_PATH="$HIDDEN_PATH"
   [[ -n "${DATABASE:-}" ]] && DEFAULT_DATABASE="$DATABASE"
+}
+
+validate_config() {
   [[ -n "${USERNAME:-}" && -n "${PASSWORD:-}" ]] || \
     { echo '{"success":false,"error":"missing_auth","reason":"Provide --user/--password or set COUCHDB_USER/COUCHDB_PASSWORD env vars"}'; return 1; }
   [[ -n "${DEFAULT_HOST:-}" ]] || \
     { echo '{"success":false,"error":"missing_host","reason":"Provide --host or set COUCHDB_HOST env var"}'; return 1; }
   [[ -n "${DEFAULT_DATABASE:-}" ]] || \
     { echo '{"success":false,"error":"missing_database","reason":"Provide --database or set COUCHDB_DATABASE env var"}'; return 1; }
+}
+
+validate_connection() {
+  merge_config
+  validate_config
 }
 
 parse_args() {

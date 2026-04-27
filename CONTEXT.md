@@ -73,22 +73,25 @@
 
 ## 🟡 中 (Code Quality / Maintainability)
 
-### [ ] #9 重复 CRLF 解码逻辑
+### [x] #9 重复 CRLF 解码逻辑 — ✅ 已修复
 - **位置**: L249-251 ≈ L260-262
 - **问题**: `\n`/`\r` 解码在单 child 和多 children 两个分支中完全重复
-- **修复**: 提取为 `decode_literal_newlines()` helper
+- **修复**: 提取 `decode_content_newlines()` helper，两个分支统一调用
 
-### [ ] #10 `curl_delete_doc_purge` 多余 `2>&1`
+### [x] #10 `curl_delete_doc_purge` 多余 `2>&1` — ✅ 已修复
 - **位置**: L158, L167
 - **问题**: `_curl` 内部已合并 stderr，外层 `2>&1` 冗余
+- **修复**: 移除两处冗余 `2>&1`
 
-### [ ] #11 变量命名混乱
+### [x] #11 变量命名混乱 — ✅ 已修复
 - **位置**: L8 `DEFAULT_HOST` vs L13 `HOST`
 - **问题**: CLI 参数用 `HOST`，env 用 `DEFAULT_HOST`，`validate_connection` 中交叉赋值
+- **修复**: 添加注释说明 DEFAULT_* 为 env fallback、CLI 变量为覆盖源，拆分后职责更清晰
 
-### [ ] #12 `validate_connection` 职责混杂
+### [x] #12 `validate_connection` 职责混杂 — ✅ 已修复
 - **位置**: L583-597
-- **问题**: 同时做变量合并（env→CLI alias）和必填校验。建议拆为 `merge_config()` + `validate_config()`
+- **问题**: 同时做变量合并（env→CLI alias）和必填校验
+- **修复**: 拆为 `merge_config()` + `validate_config()`，`validate_connection()` 保留为兼容入口
 
 ### [ ] #13 重试策略过于简单
 - **位置**: L379-392
@@ -99,13 +102,15 @@
 - **问题**: Basic Auth 每次请求触发 PBKDF2 哈希（CPU 密集）。Cookie Auth 一次认证后可复用 session cookie 10 分钟，降低服务端 CPU
 - **参考**: [CouchDB Auth Docs](https://docs.couchdb.org/en/stable/api/server/authn.html)
 
-### [ ] #15 `generate_node_id` 理论缺陷
+### [x] #15 `generate_node_id` 理论缺陷 — ✅ 已修复
 - **位置**: L189
 - **问题**: `tr -dc 'a-f0-9'` 过滤后可能少于 13 字符（概率极低但非零）
+- **修复**: 添加 while 循环确保生成满 13 字符
 
-### [ ] #16 `curl_get_doc` 错误输出格式不一致
+### [x] #16 `curl_get_doc` 错误输出格式不一致 — ✅ 已修复
 - **位置**: L106
 - **问题**: 返回 `{"error":"not_found",...}` 而非标准 `{"success":false,...}` 包装
+- **修复**: 错误分支输出 `{success:false, error:..., reason:...}` 标准格式
 
 ---
 
