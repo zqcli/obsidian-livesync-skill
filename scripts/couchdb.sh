@@ -14,6 +14,7 @@ HOST="" HIDDEN_PATH="" USERNAME="" PASSWORD="" DATABASE=""
 DOC_ID="" FILE_PATH="" CONTENT="" LIST_DIR="" CHANGES_LIMIT=""
 APPEND_MODE=false REPLACE_SECTION="" PURGE_MODE=false DELETE_DIR=""
 INSECURE=true
+PROXY="" PROXY_TYPE="socks5"
 COMMAND=""
 
 # =============================================================================
@@ -36,11 +37,37 @@ check_dependencies() {
 # =============================================================================
 
 _curl() {
-  if [[ "${INSECURE}" == "true" ]]; then
-    curl -sk "$@"
-  else
-    curl -s "$@"
+  local proxy_args=()
+  if [[ -n "${PROXY:-}" ]]; then
+    if [[ "${PROXY_TYPE}" == "http" ]]; then
+      proxy_args=(--proxy "http://${PROXY}")
+    else
+      proxy_args=(--proxy "socks5h://${PROXY}")
+    fi
   fi
+  local exit_code=0
+  local result
+  if [[ "${INSECURE}" == "true" ]]; then
+    result=$(curl -sk "${proxy_args[@]}" "$@" 2>&1) || exit_code=$?
+  else
+    result=$(curl -s "${proxy_args[@]}" "$@" 2>&1) || exit_code=$?
+  fi
+  # Detect curl-level failures (network unreachable, timeout, DNS failure, etc.)
+  if [[ $exit_code -ne 0 && ! "$result" =~ ^\{ && ! "$result" =~ ^\[ ]]; then
+    local reason=""
+    case $exit_code in
+      6)   reason="DNS resolution failed" ;;
+      7)   reason="Failed to connect to host" ;;
+      28)  reason="Connection timed out" ;;
+      35)  reason="SSL/TLS handshake failed" ;;
+      52)  reason="Empty reply from server" ;;
+      56)  reason="Connection reset by peer" ;;
+      *)   reason="curl exit code $exit_code" ;;
+    esac
+    echo "{\"success\":false,\"error\":\"connection_failed\",\"reason\":\"${reason}\"}"
+    return 1
+  fi
+  echo "$result"
 }
 
 # =============================================================================
@@ -49,7 +76,7 @@ _curl() {
 
 build_base_url() {
   local url="https://${1}"
-  [[ -n "${2:-}" ]] && url="${url}${2}"
+  [[ -n "${2:-}" ]] && url="${url}/${2}"
   echo "${url}/${3}"
 }
 
@@ -373,9 +400,12 @@ cleanup_leaf_nodes() {
 cmd_ping() {
   validate_connection || return 1
   local base_url=$(build_base_url "${HOST:-$DEFAULT_HOST}" "${HIDDEN_PATH:-$DEFAULT_PATH}" "${DATABASE:-$DEFAULT_DATABASE}")
-  local result=$(_curl -u "${USERNAME}:${PASSWORD}" "${base_url}" 2>&1)
+  local result
+  result=$(_curl -u "${USERNAME}:${PASSWORD}" "${base_url}") || return 1
   if echo "$result" | jq -e '.db_name' >/dev/null 2>&1; then
     echo "$result" | jq -c '{success:true, db_name:.db_name, doc_count:.doc_count, update_seq:.update_seq}'
+  elif echo "$result" | jq -e '.error' >/dev/null 2>&1; then
+    echo "$result"
   else
     echo '{"success":false,"error":"connection_failed","reason":"Cannot reach CouchDB"}'
   fi
@@ -552,6 +582,8 @@ validate_connection() {
     { echo '{"success":false,"error":"missing_auth","reason":"Provide --user/--password or set COUCHDB_USER/COUCHDB_PASSWORD env vars"}'; return 1; }
   [[ -n "${DEFAULT_HOST:-}" ]] || \
     { echo '{"success":false,"error":"missing_host","reason":"Provide --host or set COUCHDB_HOST env var"}'; return 1; }
+  [[ -n "${DEFAULT_DATABASE:-}" ]] || \
+    { echo '{"success":false,"error":"missing_database","reason":"Provide --database or set COUCHDB_DATABASE env var"}'; return 1; }
 }
 
 parse_args() {
@@ -579,6 +611,8 @@ parse_args() {
       --delete-dir) DELETE_DIR="$2"; shift 2 ;;
       --verify-ssl) INSECURE=false; shift ;;
       --insecure)   INSECURE=true; shift ;;
+      --proxy)      PROXY="$2"; shift 2 ;;
+      --proxy-type) PROXY_TYPE="$2"; shift 2 ;;
       INSERT|SELECT|UPDATE|DELETE|PING) COMMAND="$1"; shift ;;
       -h|--help)    show_help; exit 0 ;;
       *)            echo "Unknown: $1" >&2; exit 1 ;;
@@ -598,6 +632,8 @@ Connection (via CLI flags or env vars):
   --path              Hidden path (env: COUCHDB_PATH)
   --database          Database (env: COUCHDB_DATABASE)
   --verify-ssl        Enable SSL certificate verification (default: insecure)
+  --proxy HOST:PORT   Proxy address (CLI only, no env var)
+  --proxy-type TYPE   Proxy type: socks5 (default) or http
 
 Document:
   --doc-id ID         Document path (e.g. AgentMemory/note.md)
