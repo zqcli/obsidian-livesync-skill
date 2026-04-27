@@ -238,6 +238,32 @@ bash scripts/couchdb.sh SELECT --doc-id "AgentMemory/test/insert-content.md" | j
 - `## Status` section content: `Inactive` (replaced)
 - `## StatusReport` section content: `Q2 report` (unchanged — must NOT be affected)
 
+### T17b: UPDATE — Replace Section Reverse Order (Issue #3 Verification)
+
+This test verifies that `## Status` does NOT accidentally match `## StatusReport` when the longer-named header appears first in the document.
+
+```bash
+bash scripts/couchdb.sh INSERT --doc-id "AgentMemory/test/insert-reverse.md" \
+  --content $'# Reverse Test\n\n## StatusReport\nQ2 report\n\n## Status\nActive'
+```
+
+**Expected**: `{"success":true,"rev":"1-...","id":"agentmemory/test/insert-reverse.md"}`
+
+Replace `## Status` section:
+```bash
+bash scripts/couchdb.sh UPDATE --doc-id "AgentMemory/test/insert-reverse.md" \
+  --replace-section "## Status" --content "Inactive"
+```
+
+**Expected**: `{"success":true,"rev":"2-...","id":"agentmemory/test/insert-reverse.md"}`
+
+**Verify**:
+```bash
+bash scripts/couchdb.sh SELECT --doc-id "AgentMemory/test/insert-reverse.md" | jq -r '.content'
+```
+- `## StatusReport` section content: `Q2 report` (unchanged — must NOT be affected)
+- `## Status` section content: `Inactive` (replaced)
+
 ### T18: UPDATE — Non-existent Document
 
 ```bash
@@ -331,7 +357,7 @@ bash scripts/couchdb.sh DELETE --delete-dir "AgentMemory/test" --purge
 
 ## Pass Criteria
 
-All 23 tests (T1–T23) must produce the expected output. A test is considered:
+All 24 tests (T1–T23, including T17b) must produce the expected output. A test is considered:
 
 - **PASS**: Output matches expected result (rev hashes and seq numbers may vary)
 - **FAIL**: Output differs from expected, or command crashes/hangs

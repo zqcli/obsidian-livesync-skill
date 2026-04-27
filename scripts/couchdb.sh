@@ -355,8 +355,8 @@ replace_section() {
         after+="${line}"$'\n'
         continue
       fi
-      # Match target header (first occurrence only)
-      if [[ "$found" == false && "$line" == "$header"* ]]; then
+      # Match target header exactly (first occurrence only)
+      if [[ "$found" == false && "$line" =~ ^"$header"[[:space:]]*$ ]]; then
         found=true; in_section=true
         before+="${line}"$'\n'  # Preserve the header line
         continue
