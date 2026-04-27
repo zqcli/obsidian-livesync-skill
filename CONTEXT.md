@@ -26,13 +26,13 @@
 - **修复**: 改为 regex 精确匹配：`[[ "$line" =~ ^"$header"[[:space:]]*$ ]]`
 - **优先级**: P0 — 数据正确性
 
-### [ ] #3 size 计算不一致 ← 同步正确性 Bug
+### [x] #3 size 计算不一致 ← 同步正确性 Bug — ✅ 已修复
 - **位置**: L209 `calculate_size_for_livesync` vs L320 `build_doc_json_for_insert`
 - **问题**: 
   - `calculate_size_for_livesync`: `sub("\n+$";"")` — 去除**所有**尾部换行
   - `build_doc_json_for_insert`: `sub("\n$";"")` — 只去除**一个**尾部换行
 - **场景**: 内容为 `"text\n\n"` 时，两个计算得出不同 size。INSERT 存储的 size 与 LiveSync 期望的 size 不一致，可能导致同步校验失败。
-- **修复**: 统一使用 `sub("\n+$";"")`
+- **修复**: `build_doc_json_for_insert` 统一使用 `sub("\n+$";"")`
 - **优先级**: P0 — 同步正确性
 
 ---

@@ -317,7 +317,7 @@ resolve_latest_rev() {
 build_doc_json_for_insert() {
   local doc_id="$1" node_id="$2" timestamp="$3" content="$4"
   local id_lower=$(echo "$doc_id" | tr '[:upper:]' '[:lower:]')
-  local size=$(printf '%s' "$content" | jq -sRj 'sub("\n$";"")' | wc -c | tr -d ' ')
+  local size=$(printf '%s' "$content" | jq -sRj 'sub("\n+$";"")' | wc -c | tr -d ' ')
   local children=$(jq -c -n --arg n "$node_id" '[$n]')
   jq -c -n --arg id "$id_lower" --arg path "$doc_id" --argjson children "$children" \
     --arg ctime "$timestamp" --arg mtime "$timestamp" --arg size "$size" \
