@@ -5,7 +5,7 @@ description: >
   and delete Markdown documents that sync with Obsidian via LiveSync plugin.
   Use when the user wants to create, read, update, or delete notes, journal entries,
   or any Markdown documents in their Obsidian vault without having Obsidian installed.
-  Supports stdin pipe input, env var authentication, automatic write conflict retry,
+  Supports stdin pipe input, file input, env var authentication, automatic write conflict retry,
   and leaf node cleanup on purge.
 license: MIT
 compatibility: >

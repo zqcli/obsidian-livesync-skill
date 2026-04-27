@@ -116,13 +116,15 @@
 
 ## 🟢 低 (Documentation / Tooling)
 
-### [ ] #17 SKILL.md 头部描述缺少 `--file` 提及
+### [x] #17 SKILL.md 头部描述缺少 `--file` 提及 — ✅ 已修复
 - **位置**: SKILL.md:8
 - **问题**: "Supports stdin pipe input, env var authentication..." 未提及 `--file`
+- **修复**: 添加 "file input" 到描述中
 
-### [ ] #18 `--help` 未按命令分组
+### [x] #18 `--help` 未按命令分组 — ✅ 已修复
 - **位置**: L633-665 `show_help`
 - **问题**: 列出所有参数，难以区分哪些适用 INSERT / 哪些适用 DELETE / 哪些适用 SELECT
+- **修复**: 按命令分组参数，每个命令单独列出其可用参数
 
 ### [ ] #19 缺少 CI 配置
 - **问题**: 缺少 shellcheck 静态检查 + 跨平台自动化测试

@@ -672,9 +672,14 @@ show_help() {
   cat <<'EOF'
 Usage: couchdb.sh <COMMAND> [OPTIONS]
 
-Commands: INSERT | SELECT | UPDATE | DELETE | PING
+Commands:
+  PING      Test connection to CouchDB
+  INSERT    Create a new document
+  SELECT    Read document(s) or list changes
+  UPDATE    Modify an existing document
+  DELETE    Remove document(s)
 
-Connection (via CLI flags or env vars):
+Connection (all commands):
   --user/--password   Auth (env: COUCHDB_USER / COUCHDB_PASSWORD)
   --host              Host (env: COUCHDB_HOST)
   --path              Hidden path (env: COUCHDB_PATH)
@@ -684,22 +689,27 @@ Connection (via CLI flags or env vars):
   --proxy HOST:PORT   Proxy address (CLI only, no env var)
   --proxy-type TYPE   Proxy type: socks5 (default) or http
 
-Document:
+INSERT:
   --doc-id ID         Document path (e.g. AgentMemory/note.md)
   --content TEXT      Content string (also accepts stdin pipe)
   --file PATH         Read content from local file
 
 SELECT:
+  --doc-id ID         Read a single document
   --list-dir DIR      List documents in directory
   --changes N         Get N recent changes
 
 UPDATE:
+  --doc-id ID         Document to update (required)
+  --content TEXT      New content (also accepts stdin pipe or --file)
+  --file PATH         Read content from local file
   --append            Append instead of replace
-  --replace-section H Replace content under header H (preserves the header line)
+  --replace-section H Replace content under heading H
 
 DELETE:
-  --purge             Permanently delete (remove history + leaf nodes)
+  --doc-id ID         Delete a single document
   --delete-dir DIR    Delete all docs in directory
+  --purge             Permanently delete (remove history + leaf nodes)
 EOF
 }
 
