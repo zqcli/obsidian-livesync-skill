@@ -19,11 +19,11 @@
 - **修复**: `INSECURE=false` 改为默认安全；`--insecure` / `--verify-ssl` flag 保留供用户显式选择。
 - **优先级**: P0 — 安全基线
 
-### [ ] #2 `replace_section` 标题匹配过于宽松 ← 功能 Bug
+### [x] #2 `replace_section` 标题匹配过于宽松 ← 功能 Bug — ✅ 已修复 (Issue #3, commit 85db345)
 - **位置**: L359 `[[ "$line" == "$header"* ]]`
 - **问题**: glob 匹配 `## Status*` 会误匹配 `## StatusReport`、`## StatusUpdate` 等标题名称包含目标前缀的段落。
 - **场景**: `--replace-section "## Status"` 但文档中同时存在 `## Status` 和 `## StatusHistory`，后者内容会被错误覆盖。
-- **修复**: 改为精确匹配：`[[ "$line" == "$header" ]] || [[ "$line" == "$header "* ]]`
+- **修复**: 改为 regex 精确匹配：`[[ "$line" =~ ^"$header"[[:space:]]*$ ]]`
 - **优先级**: P0 — 数据正确性
 
 ### [ ] #3 size 计算不一致 ← 同步正确性 Bug
