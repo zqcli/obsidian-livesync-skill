@@ -30,8 +30,20 @@ Set environment variables or pass CLI flags:
 | `COUCHDB_HOST` | `--host` | Yes | Host with port, e.g. `obs.example.com:8443` |
 | `COUCHDB_USER` | `--user` | Yes | CouchDB username |
 | `COUCHDB_PASSWORD` | `--password` | Yes | CouchDB password |
+| `COUCHDB_DATABASE` | `--database` | Yes | Database name, e.g. `obsinote` |
 | `COUCHDB_PATH` | `--path` | No | Hidden path prefix, e.g. `/e=_9f3k2a` |
-| `COUCHDB_DATABASE` | `--database` | No | Database name, e.g. `obsinote` |
+
+### Proxy (CLI only)
+
+| Flag | Default | Description |
+|---|---|---|
+| `--proxy` | none | Proxy address, format `host:port` |
+| `--proxy-type` | socks5 | Proxy type: `socks5` or `http` |
+
+```bash
+bash scripts/couchdb.sh PING --proxy 127.0.0.1:12080
+bash scripts/couchdb.sh PING --proxy proxy.corp.com:8080 --proxy-type http
+```
 
 ## Usage
 
@@ -97,6 +109,8 @@ bash scripts/couchdb.sh DELETE --delete-dir "Notes/temp"
 - `--replace-section` matches any header level (`#` through `######`). It preserves the header line and replaces content below it until the next header of equal or higher level.
 - UPDATE automatically retries up to 3 times on CouchDB 409 conflicts.
 - Content priority: `--file` > `--content` > stdin.
+- `--database` is **required** for all commands. Without it, the script returns `{"success":false,"error":"missing_database"}`.
+- When network is unreachable, the script returns structured JSON errors (e.g. `{"success":false,"error":"connection_failed","reason":"Connection timed out"}`) instead of silent failures.
 
 ## License
 

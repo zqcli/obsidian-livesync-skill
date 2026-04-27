@@ -34,10 +34,22 @@ Set these environment variables before use:
 | `COUCHDB_HOST` | Yes | Host with port, e.g. `obs.example.com:8443` |
 | `COUCHDB_USER` | Yes | CouchDB username |
 | `COUCHDB_PASSWORD` | Yes | CouchDB password |
+| `COUCHDB_DATABASE` | Yes | Database name, e.g. `obsinote` |
 | `COUCHDB_PATH` | No | Hidden path prefix, e.g. `/e=_9f3k2a` |
-| `COUCHDB_DATABASE` | No | Database name, e.g. `obsinote` |
 
 Alternatively, pass credentials via CLI flags: `--user`, `--password`, `--host`, `--path`, `--database`.
+
+### Proxy (CLI only)
+
+| Flag | Default | Description |
+|---|---|---|
+| `--proxy` | none | Proxy address, format `host:port` |
+| `--proxy-type` | socks5 | Proxy type: `socks5` or `http` |
+
+```bash
+bash scripts/couchdb.sh PING --proxy 127.0.0.1:12080
+bash scripts/couchdb.sh PING --proxy proxy.corp.com:8080 --proxy-type http
+```
 
 ## Commands
 

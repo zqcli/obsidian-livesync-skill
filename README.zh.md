@@ -30,8 +30,20 @@
 | `COUCHDB_HOST` | `--host` | 是 | 主机和端口，如 `obs.example.com:8443` |
 | `COUCHDB_USER` | `--user` | 是 | CouchDB 用户名 |
 | `COUCHDB_PASSWORD` | `--password` | 是 | CouchDB 密码 |
+| `COUCHDB_DATABASE` | `--database` | 是 | 数据库名称，如 `obsinote` |
 | `COUCHDB_PATH` | `--path` | 否 | 隐藏路径前缀，如 `/e=_9f3k2a` |
-| `COUCHDB_DATABASE` | `--database` | 否 | 数据库名称，如 `obsinote` |
+
+### 代理（仅 CLI）
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--proxy` | 无 | 代理地址，格式 `host:port` |
+| `--proxy-type` | socks5 | 代理类型：`socks5` 或 `http` |
+
+```bash
+bash scripts/couchdb.sh PING --proxy 127.0.0.1:12080
+bash scripts/couchdb.sh PING --proxy proxy.corp.com:8080 --proxy-type http
+```
 
 ## 使用方法
 
@@ -97,6 +109,8 @@ bash scripts/couchdb.sh DELETE --delete-dir "Notes/temp"
 - `--replace-section` 匹配任意标题级别（`#` 到 `######`），保留标题行本身，替换其下方内容直到遇到同级或更高级标题。
 - UPDATE 操作在遇到 CouchDB 409 冲突时自动重试（最多 3 次）。
 - 内容输入优先级：`--file` > `--content` > stdin。
+- `--database` 为所有命令的**必填参数**。缺少时脚本返回 `{"success":false,"error":"missing_database"}`。
+- 网络不可达时，脚本返回结构化 JSON 错误（如 `{"success":false,"error":"connection_failed","reason":"Connection timed out"}`），而非静默失败。
 
 ## 许可证
 
