@@ -48,9 +48,9 @@ _curl() {
   local exit_code=0
   local result
   if [[ "${INSECURE}" == "true" ]]; then
-    result=$(curl -sk "${proxy_args[@]}" "$@" 2>&1) || exit_code=$?
+    result=$(curl -sk ${proxy_args+"${proxy_args[@]}"} "$@" 2>&1) || exit_code=$?
   else
-    result=$(curl -s "${proxy_args[@]}" "$@" 2>&1) || exit_code=$?
+    result=$(curl -s ${proxy_args+"${proxy_args[@]}"} "$@" 2>&1) || exit_code=$?
   fi
   # Detect curl-level failures (network unreachable, timeout, DNS failure, etc.)
   if [[ $exit_code -ne 0 && ! "$result" =~ ^\{ && ! "$result" =~ ^\[ ]]; then
@@ -411,13 +411,15 @@ cmd_ping() {
   validate_connection || return 1
   local base_url=$(build_base_url "${HOST:-$DEFAULT_HOST}" "${HIDDEN_PATH:-$DEFAULT_PATH}" "${DATABASE:-$DEFAULT_DATABASE}")
   local result
-  result=$(_curl -u "${USERNAME}:${PASSWORD}" "${base_url}") || return 1
+  result=$(_curl -u "${USERNAME}:${PASSWORD}" "${base_url}") || true
   if echo "$result" | jq -e '.db_name' >/dev/null 2>&1; then
     echo "$result" | jq -c '{success:true, db_name:.db_name, doc_count:.doc_count, update_seq:.update_seq}'
   elif echo "$result" | jq -e '.error' >/dev/null 2>&1; then
     echo "$result"
+    return 1
   else
     echo '{"success":false,"error":"connection_failed","reason":"Cannot reach CouchDB"}'
+    return 1
   fi
 }
 
