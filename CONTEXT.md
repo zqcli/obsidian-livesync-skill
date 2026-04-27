@@ -13,10 +13,10 @@
 
 ## 🔴 严重 (Security / Data Correctness)
 
-### [ ] #1 SSL 证书验证默认禁用 ← 安全问题
+### [x] #1 SSL 证书验证默认禁用 ← 安全问题 — ✅ 已修复
 - **位置**: L18 `INSECURE=true` → L56 `curl -sk`
 - **问题**: 默认跳过 TLS 证书验证。所有请求（含 Basic Auth 凭证）可在 MITM 攻击下被窃取。
-- **修复**: `INSECURE=false` 改为默认安全；`--insecure` / `--verify-ssl` flag 保留供用户显式选择。
+- **修复**: `INSECURE=false` 改为默认安全；`--insecure` flag 保留供用户显式选择。帮助文档和 README 同步更新。
 - **优先级**: P0 — 安全基线
 
 ### [x] #2 `replace_section` 标题匹配过于宽松 ← 功能 Bug — ✅ 已修复 (Issue #3, commit 85db345)

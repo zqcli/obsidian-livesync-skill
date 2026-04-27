@@ -643,7 +643,8 @@ Connection (via CLI flags or env vars):
   --host              Host (env: COUCHDB_HOST)
   --path              Hidden path (env: COUCHDB_PATH)
   --database          Database (env: COUCHDB_DATABASE)
-  --verify-ssl        Enable SSL certificate verification (default: insecure)
+  --insecure          Skip SSL certificate verification (default: verify)
+  --verify-ssl        Enable SSL certificate verification (this is the default)
   --proxy HOST:PORT   Proxy address (CLI only, no env var)
   --proxy-type TYPE   Proxy type: socks5 (default) or http
 

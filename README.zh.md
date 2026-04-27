@@ -39,6 +39,8 @@
 |---|---|---|
 | `--proxy` | 无 | 代理地址，格式 `host:port` |
 | `--proxy-type` | socks5 | 代理类型：`socks5` 或 `http` |
+| `--insecure` | 关闭 | 跳过 SSL 证书验证 |
+| `--verify-ssl` | 开启 | 启用 SSL 证书验证（默认） |
 
 ```bash
 bash scripts/couchdb.sh PING --proxy 127.0.0.1:12080
@@ -111,6 +113,7 @@ bash scripts/couchdb.sh DELETE --delete-dir "Notes/temp"
 - 内容输入优先级：`--file` > `--content` > stdin。
 - `--database` 为所有命令的**必填参数**。缺少时脚本返回 `{"success":false,"error":"missing_database"}`。
 - 网络不可达时，脚本返回结构化 JSON 错误（如 `{"success":false,"error":"connection_failed","reason":"Connection timed out"}`），而非静默失败。
+- SSL 证书验证**默认启用**。使用 `--insecure` 跳过验证（例如自签名证书场景）。
 
 ## 许可证
 

@@ -39,6 +39,8 @@ Set environment variables or pass CLI flags:
 |---|---|---|
 | `--proxy` | none | Proxy address, format `host:port` |
 | `--proxy-type` | socks5 | Proxy type: `socks5` or `http` |
+| `--insecure` | off | Skip SSL certificate verification |
+| `--verify-ssl` | on | Enable SSL certificate verification (default) |
 
 ```bash
 bash scripts/couchdb.sh PING --proxy 127.0.0.1:12080
@@ -111,6 +113,7 @@ bash scripts/couchdb.sh DELETE --delete-dir "Notes/temp"
 - Content priority: `--file` > `--content` > stdin.
 - `--database` is **required** for all commands. Without it, the script returns `{"success":false,"error":"missing_database"}`.
 - When network is unreachable, the script returns structured JSON errors (e.g. `{"success":false,"error":"connection_failed","reason":"Connection timed out"}`) instead of silent failures.
+- SSL certificate verification is **enabled by default**. Use `--insecure` to skip verification (e.g. for self-signed certificates).
 
 ## License
 
