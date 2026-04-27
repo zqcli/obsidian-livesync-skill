@@ -86,7 +86,7 @@ check_doc_exists() {
   local keys_json=$(jq -c -n --arg key "$doc_id_lower" '[$key]')
   local encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
   local result=$(_curl -u "${username}:${password}" \
-    "${base_url}/_all_docs?keys=${encoded_keys}" 2>&1)
+    "${base_url}/_all_docs?keys=${encoded_keys}")
   if echo "$result" | jq -e '.rows[0].error' >/dev/null 2>&1; then
     echo "false"
   else
@@ -99,7 +99,7 @@ curl_get_doc() {
   local keys_json=$(jq -c -n --arg key "$doc_id" '[$key]')
   local encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
   local result=$(_curl -u "${username}:${password}" \
-    "${base_url}/_all_docs?include_docs=true&keys=${encoded_keys}" 2>&1)
+    "${base_url}/_all_docs?include_docs=true&keys=${encoded_keys}")
   if echo "$result" | jq -e '.rows[0].doc' >/dev/null 2>&1; then
     echo "$result" | jq '.rows[0].doc'
   elif echo "$result" | jq -e '.rows[0].error' >/dev/null 2>&1; then
@@ -110,14 +110,14 @@ curl_get_doc() {
 }
 
 curl_insert_doc() {
-  _curl -u "${4}:${5}" -X POST -H 'Content-Type: application/json' -d "$3" "$1" 2>&1
+  _curl -u "${4}:${5}" -X POST -H 'Content-Type: application/json' -d "$3" "$1"
 }
 
 curl_update_doc() {
   local doc_with_rev=$(echo "$4" | jq --arg rev "$3" '. + {_rev: $rev}')
   local bulk_json=$(jq -c -n --argjson docs "[${doc_with_rev}]" '{docs: $docs}')
   _curl -u "${5}:${6}" -X POST -H 'Content-Type: application/json' \
-    -d "$bulk_json" "${1}/_bulk_docs" 2>&1
+    -d "$bulk_json" "${1}/_bulk_docs"
 }
 
 curl_insert_node() {
@@ -125,7 +125,7 @@ curl_insert_node() {
   local node_json=$(jq -c -n --arg id "$node_id" --argjson data "$content_json" \
     '{_id: $id, type: "leaf", data: $data}')
   _curl -u "${username}:${password}" -X PUT -H 'Content-Type: application/json' \
-    -d "$node_json" "${base_url}/${node_id}" 2>&1
+    -d "$node_json" "${base_url}/${node_id}"
 }
 
 curl_list_dir() {
@@ -134,20 +134,20 @@ curl_list_dir() {
   local endkey=$(jq -n --arg p "${prefix}/" '$p + "\uffff"')
   local enc_start=$(jq -rn --arg v "$startkey" '$v|@uri')
   local enc_end=$(jq -rn --arg v "$endkey" '$v|@uri')
-  _curl -u "${3}:${4}" "${1}/_all_docs?startkey=${enc_start}&endkey=${enc_end}" 2>&1
+  _curl -u "${3}:${4}" "${1}/_all_docs?startkey=${enc_start}&endkey=${enc_end}"
 }
 
 curl_list_all() {
-  _curl -u "${2}:${3}" "${1}/_all_docs" 2>&1
+  _curl -u "${2}:${3}" "${1}/_all_docs"
 }
 
 curl_changes() {
-  _curl -u "${3}:${4}" "${1}/_changes?limit=${2}&descending=true" 2>&1
+  _curl -u "${3}:${4}" "${1}/_changes?limit=${2}&descending=true"
 }
 
 curl_delete_doc_soft() {
   local bulk=$(jq -c -n --arg id "$2" --arg rev "$3" '{docs:[{_id:$id,_rev:$rev,_deleted:true}]}')
-  _curl -u "${4}:${5}" -X POST -H 'Content-Type: application/json' -d "$bulk" "${1}/_bulk_docs" 2>&1
+  _curl -u "${4}:${5}" -X POST -H 'Content-Type: application/json' -d "$bulk" "${1}/_bulk_docs"
 }
 
 curl_delete_doc_purge() {
@@ -174,7 +174,7 @@ curl_delete_doc_purge() {
 
 curl_delete_node() {
   local base_url="$1" node_id="$2" username="$3" password="$4"
-  local node=$(_curl -u "${username}:${password}" "${base_url}/${node_id}" 2>&1)
+  local node=$(_curl -u "${username}:${password}" "${base_url}/${node_id}")
   local node_rev=$(echo "$node" | jq -r '._rev // empty' 2>/dev/null)
   [[ -z "$node_rev" ]] && return 0
   _curl -u "${username}:${password}" -X DELETE \
@@ -245,12 +245,13 @@ resolve_full_content() {
   local doc_json="$1" base_url="$2" username="$3" password="$4"
   local children=$(echo "$doc_json" | jq -r '.children[]? // empty')
   [[ -z "$children" ]] && { echo "$doc_json" | jq -r '.data // empty'; return; }
-  local full=""
-  for node_id in $children; do
-    local node=$(_curl -u "${username}:${password}" "${base_url}/${node_id}" 2>&1)
-    echo "$node" | jq -e '.error' >/dev/null 2>&1 || full+=$(echo "$node" | jq -r '.data // empty')
-  done
-  echo "$full"
+  # Build keys array and fetch all leaf nodes in a single bulk query
+  local keys_json=$(echo "$children" | jq -R . | jq -s .)
+  local encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
+  local result
+  result=$(_curl -u "${username}:${password}" \
+    "${base_url}/_all_docs?include_docs=true&keys=${encoded_keys}") || return 1
+  echo "$result" | jq -r '[.rows[].doc.data // empty] | join("")'
 }
 
 format_select_result() {
@@ -297,7 +298,7 @@ resolve_latest_rev() {
   local base_url="$1" doc_id="$2" username="$3" password="$4"
   local keys_json=$(jq -c -n --arg key "$doc_id" '[$key]')
   local encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
-  local result=$(_curl -u "${username}:${password}" "${base_url}/_all_docs?keys=${encoded_keys}" 2>&1)
+  local result=$(_curl -u "${username}:${password}" "${base_url}/_all_docs?keys=${encoded_keys}")
   if echo "$result" | jq -e '.rows[0].value.rev' >/dev/null 2>&1; then
     echo "$result" | jq -r '.rows[0].value.rev'
   else
