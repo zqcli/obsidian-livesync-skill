@@ -13,7 +13,7 @@ compatibility: >
   CouchDB instance with Obsidian LiveSync configured.
 metadata:
   author: https://github.com/zqcli
-  version: "1.2.0"
+  version: "1.3.0"
 allowed-tools: Bash(scripts/couchdb.sh:*)
 ---
 
@@ -144,11 +144,15 @@ Directory output: `{"success":true,"directory":"...","deleted_count":N}`
 - **Soft delete** is the standard Obsidian behavior. Use **purge** only when you want to permanently remove all traces.
 - **Content** can be provided via `--content`, `--file`, or stdin pipe. Priority: `--file` > `--content` > stdin.
 - All output is JSON. On success, the `success` field is `true`. On failure, `success` is `false` with `error` and `reason` fields.
+- SSL certificate verification is **enabled by default**. Use `--insecure` to skip (e.g. self-signed certs).
+- `--purge` requires CouchDB server admin privileges.
+- Connection timeout is 10 seconds; max request time is 120 seconds.
 
 ## Edge Cases
 
 - Inserting a document that already exists returns `{"success":false,"error":"doc_exists"}`.
-- Selecting a non-existent document returns `{"error":"not_found","reason":null}` with exit code 1.
+- Selecting a non-existent document returns `{"success":false,"error":"not_found","reason":null}` with exit code 1.
 - Updating a non-existent document returns `{"success":false,"error":"doc_not_found"}`.
+- `--changes` with non-integer value returns `{"success":false,"error":"invalid_parameter"}`.
 - If no credentials are configured, returns `{"success":false,"error":"missing_auth",...}`.
 - If required dependencies are missing, the script exits with a JSON error listing them.
