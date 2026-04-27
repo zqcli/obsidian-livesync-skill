@@ -39,34 +39,34 @@
 
 ## 🟠 高 (Robustness / Reliability)
 
-### [ ] #4 `--content ""` 空值处理缺陷
+### [x] #4 `--content ""` 空值处理缺陷 — ✅ 已修复
 - **位置**: L431 `[[ -n "${CONTENT:-}" ]]`
 - **问题**: 用户显式传 `--content ""` 时 `-n` 对空串返回 false，fall through 到 stdin 检查，最终报 `"missing_content"`。
-- **修复**: 引入标记变量区分"未传"和"传空值"
+- **修复**: 引入 `CONTENT_SET` 标记变量区分"未传"和"传空值"，INSERT 和 UPDATE 均已适配
 - **优先级**: P1
 
-### [ ] #5 `--changes` 参数未校验
+### [x] #5 `--changes` 参数未校验 — ✅ 已修复
 - **位置**: L476 直接使用 `$CHANGES_LIMIT`
 - **问题**: `--changes abc` 将非数字传给 CouchDB，产生难以解析的错误。
-- **修复**: 添加 `[[ "$CHANGES_LIMIT" =~ ^[0-9]+$ ]]` 校验
+- **修复**: 添加 `[[ "$CHANGES_LIMIT" =~ ^[0-9]+$ ]]` 校验，返回 `invalid_parameter` JSON 错误
 - **优先级**: P1
 
-### [ ] #6 `resolve_latest_rev` 失败无结构化错误
+### [x] #6 `resolve_latest_rev` 失败无结构化错误 — ✅ 已修复
 - **位置**: L313 `echo "ERROR: Could not resolve rev" >&2`
 - **问题**: 错误消息是 raw 文本而非 JSON。`cmd_delete` for 循环中若某 doc 的 rev 解析失败，后续操作静默跳过。
-- **修复**: 输出 JSON 错误并被调用者检查
+- **修复**: 输出 JSON 格式错误 `{"success":false,"error":"rev_not_found",...}` 到 stderr
 - **优先级**: P1
 
-### [ ] #7 `_curl` 缺少 `--connect-timeout`
+### [x] #7 `_curl` 缺少 `--connect-timeout` — ✅ 已修复
 - **位置**: L50-71 `_curl` 函数
 - **问题**: 默认 curl 超时可能长达数分钟（取决于 OS）。代理不可达时用户长时间等待。
-- **修复**: `--connect-timeout 10 --max-time 120`
+- **修复**: 添加 `--connect-timeout 10 --max-time 120`
 - **优先级**: P1
 
-### [ ] #8 `local` 屏蔽命令替换退出码 (SC2155)
+### [x] #8 `local` 屏蔽命令替换退出码 (SC2155) — ✅ 已修复（关键路径）
 - **位置**: 多处 (L85-89, L99-101, L320, L343 等，约 15-20 处)
 - **问题**: `local x=$(command)` 吞掉 `command` 的退出码。`set -e` 下 `local` 声明是已知例外。
-- **修复**: `local size; size=$(...) || return 1`
+- **修复**: 关键 `_curl` 调用处（`check_doc_exists`、`curl_get_doc`、`resolve_latest_rev`、`curl_delete_doc_purge`、`curl_delete_node`）已拆分为 `local var; var=$(...) || return`。纯 jq 本地变换保持原样（风险极低）
 - **优先级**: P2 — 实用风险低但属规范缺陷
 
 ---

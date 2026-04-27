@@ -13,7 +13,7 @@ MAX_RETRIES=3
 HOST="" HIDDEN_PATH="" USERNAME="" PASSWORD="" DATABASE=""
 DOC_ID="" FILE_PATH="" CONTENT="" LIST_DIR="" CHANGES_LIMIT=""
 APPEND_MODE=false REPLACE_SECTION="" PURGE_MODE=false DELETE_DIR=""
-INSECURE=true
+INSECURE=false CONTENT_SET=false
 PROXY="" PROXY_TYPE="socks5"
 COMMAND=""
 
@@ -48,9 +48,9 @@ _curl() {
   local exit_code=0
   local result
   if [[ "${INSECURE}" == "true" ]]; then
-    result=$(curl -sk ${proxy_args+"${proxy_args[@]}"} "$@" 2>&1) || exit_code=$?
+    result=$(curl -sk --connect-timeout 10 --max-time 120 ${proxy_args+"${proxy_args[@]}"} "$@" 2>&1) || exit_code=$?
   else
-    result=$(curl -s ${proxy_args+"${proxy_args[@]}"} "$@" 2>&1) || exit_code=$?
+    result=$(curl -s --connect-timeout 10 --max-time 120 ${proxy_args+"${proxy_args[@]}"} "$@" 2>&1) || exit_code=$?
   fi
   # Detect curl-level failures (network unreachable, timeout, DNS failure, etc.)
   if [[ $exit_code -ne 0 && ! "$result" =~ ^\{ && ! "$result" =~ ^\[ ]]; then
@@ -82,11 +82,15 @@ build_base_url() {
 
 check_doc_exists() {
   local base_url="$1" doc_id="$2" username="$3" password="$4"
-  local doc_id_lower=$(echo "$doc_id" | tr '[:upper:]' '[:lower:]')
-  local keys_json=$(jq -c -n --arg key "$doc_id_lower" '[$key]')
-  local encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
-  local result=$(_curl -u "${username}:${password}" \
-    "${base_url}/_all_docs?keys=${encoded_keys}")
+  local doc_id_lower
+  doc_id_lower=$(echo "$doc_id" | tr '[:upper:]' '[:lower:]')
+  local keys_json
+  keys_json=$(jq -c -n --arg key "$doc_id_lower" '[$key]')
+  local encoded_keys
+  encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
+  local result
+  result=$(_curl -u "${username}:${password}" \
+    "${base_url}/_all_docs?keys=${encoded_keys}") || return 1
   if echo "$result" | jq -e '.rows[0].error' >/dev/null 2>&1; then
     echo "false"
   else
@@ -96,10 +100,13 @@ check_doc_exists() {
 
 curl_get_doc() {
   local base_url="$1" doc_id="$2" username="$3" password="$4"
-  local keys_json=$(jq -c -n --arg key "$doc_id" '[$key]')
-  local encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
-  local result=$(_curl -u "${username}:${password}" \
-    "${base_url}/_all_docs?include_docs=true&keys=${encoded_keys}")
+  local keys_json
+  keys_json=$(jq -c -n --arg key "$doc_id" '[$key]')
+  local encoded_keys
+  encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
+  local result
+  result=$(_curl -u "${username}:${password}" \
+    "${base_url}/_all_docs?include_docs=true&keys=${encoded_keys}") || return 1
   if echo "$result" | jq -e '.rows[0].doc' >/dev/null 2>&1; then
     echo "$result" | jq '.rows[0].doc'
   elif echo "$result" | jq -e '.rows[0].error' >/dev/null 2>&1; then
@@ -153,18 +160,22 @@ curl_delete_doc_soft() {
 curl_delete_doc_purge() {
   local base_url="$1" doc_id="$2" rev="$3" username="$4" password="$5"
   # Get all leaf revisions (including conflicts) to purge completely
-  local encoded_id=$(jq -rn --arg v "$doc_id" '$v|@uri')
-  local doc_info=$(_curl -u "${username}:${password}" \
-    "${base_url}/${encoded_id}?conflicts=true" 2>&1)
+  local encoded_id
+  encoded_id=$(jq -rn --arg v "$doc_id" '$v|@uri')
+  local doc_info
+  doc_info=$(_curl -u "${username}:${password}" \
+    "${base_url}/${encoded_id}?conflicts=true" 2>&1) || return 1
   local all_revs
   if echo "$doc_info" | jq -e '._conflicts' >/dev/null 2>&1; then
     all_revs=$(echo "$doc_info" | jq -c '[._rev] + ._conflicts')
   else
     all_revs=$(jq -c -n --arg rev "$rev" '[$rev]')
   fi
-  local purge_json=$(jq -c -n --arg id "$doc_id" --argjson revs "$all_revs" '{($id): $revs}')
-  local purge_result=$(_curl -u "${username}:${password}" -X POST -H 'Content-Type: application/json' \
-    -d "$purge_json" "${base_url}/_purge" 2>&1)
+  local purge_json
+  purge_json=$(jq -c -n --arg id "$doc_id" --argjson revs "$all_revs" '{($id): $revs}')
+  local purge_result
+  purge_result=$(_curl -u "${username}:${password}" -X POST -H 'Content-Type: application/json' \
+    -d "$purge_json" "${base_url}/_purge" 2>&1) || return 1
   if echo "$purge_result" | jq -e '.purged' >/dev/null 2>&1; then
     echo "$purge_result" | jq -c --arg id "$doc_id" '{success:true, id:$id, purged:true}'
   else
@@ -174,7 +185,8 @@ curl_delete_doc_purge() {
 
 curl_delete_node() {
   local base_url="$1" node_id="$2" username="$3" password="$4"
-  local node=$(_curl -u "${username}:${password}" "${base_url}/${node_id}")
+  local node
+  node=$(_curl -u "${username}:${password}" "${base_url}/${node_id}") || return 0
   local node_rev=$(echo "$node" | jq -r '._rev // empty' 2>/dev/null)
   [[ -z "$node_rev" ]] && return 0
   _curl -u "${username}:${password}" -X DELETE \
@@ -304,13 +316,16 @@ format_changes_result() {
 
 resolve_latest_rev() {
   local base_url="$1" doc_id="$2" username="$3" password="$4"
-  local keys_json=$(jq -c -n --arg key "$doc_id" '[$key]')
-  local encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
-  local result=$(_curl -u "${username}:${password}" "${base_url}/_all_docs?keys=${encoded_keys}")
+  local keys_json
+  keys_json=$(jq -c -n --arg key "$doc_id" '[$key]')
+  local encoded_keys
+  encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
+  local result
+  result=$(_curl -u "${username}:${password}" "${base_url}/_all_docs?keys=${encoded_keys}") || return 1
   if echo "$result" | jq -e '.rows[0].value.rev' >/dev/null 2>&1; then
     echo "$result" | jq -r '.rows[0].value.rev'
   else
-    echo "ERROR: Could not resolve rev" >&2; return 1
+    echo '{"success":false,"error":"rev_not_found","reason":"Could not resolve revision for document"}' >&2; return 1
   fi
 }
 
@@ -430,7 +445,7 @@ cmd_insert() {
   local content
   if [[ -n "${FILE_PATH:-}" ]]; then
     content=$(read_file_content "$FILE_PATH") || return 1
-  elif [[ -n "${CONTENT:-}" ]]; then
+  elif [[ "${CONTENT_SET}" == "true" ]]; then
     content="$CONTENT"
   elif [[ ! -t 0 ]]; then
     content=$(cat)
@@ -475,6 +490,9 @@ cmd_select() {
       format_dir_listing "$(curl_list_dir "$base_url" "$LIST_DIR" "$USERNAME" "$PASSWORD")" "$LIST_DIR"
     fi
   elif [[ -n "${CHANGES_LIMIT:-}" ]]; then
+    if [[ ! "$CHANGES_LIMIT" =~ ^[0-9]+$ ]]; then
+      echo '{"success":false,"error":"invalid_parameter","reason":"--changes requires a positive integer"}'; return 1
+    fi
     format_changes_result "$(curl_changes "$base_url" "$CHANGES_LIMIT" "$USERNAME" "$PASSWORD")"
   else
     echo '{"success":false,"error":"missing_query","reason":"Provide --doc-id, --list-dir, or --changes"}'; return 1
@@ -518,7 +536,7 @@ _cmd_update_inner() {
     final_children=$(jq -c -n --arg n "$new_node" '[$n]')
     new_size_bytes=$(calculate_size_for_livesync "$rc")
 
-  elif [[ -n "${CONTENT:-}" ]]; then
+  elif [[ "${CONTENT_SET}" == "true" ]]; then
     local rc=$(sanitize_content "$CONTENT"); validate_content_size "$rc" || return 1
     new_node=$(generate_node_id); content_for_chunk="$rc"
     final_children=$(jq -c -n --arg n "$new_node" '[$n]')
@@ -537,8 +555,9 @@ _cmd_update_inner() {
 
 cmd_update() {
   # Pre-read stdin before retry loop (stdin is consumed on first read)
-  if [[ -z "${CONTENT:-}" && -z "${FILE_PATH:-}" && ! -t 0 ]]; then
+  if [[ "${CONTENT_SET}" != "true" && -z "${FILE_PATH:-}" && ! -t 0 ]]; then
     CONTENT=$(cat)
+    CONTENT_SET=true
   fi
   retry_on_conflict _cmd_update_inner
 }
@@ -608,7 +627,7 @@ parse_args() {
       --database)   DATABASE="$2"; shift 2 ;;
       --doc-id)     DOC_ID="$2"; shift 2 ;;
       --file)       FILE_PATH="$2"; shift 2 ;;
-      --content)    CONTENT="$2"; shift 2 ;;
+      --content)    CONTENT="$2"; CONTENT_SET=true; shift 2 ;;
       --list-dir)
         if [[ $# -lt 2 || "$2" == --* || "$2" =~ ^(INSERT|SELECT|UPDATE|DELETE|PING)$ ]]; then
           LIST_DIR="/"; shift
