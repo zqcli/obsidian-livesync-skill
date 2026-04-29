@@ -97,9 +97,10 @@
 - **位置**: L379-392
 - **问题**: 固定 0.5 秒延迟无指数退避。高并发场景下可能导致连续冲突 (thundering herd)
 
-### [ ] #14 Cookie Auth 可替代 Basic Auth
+### [x] #14 Cookie Auth 可替代 Basic Auth — ✅ 已修复
 - **位置**: `_curl` 函数 (L50-71)
 - **问题**: Basic Auth 每次请求触发 PBKDF2 哈希（CPU 密集）。Cookie Auth 一次认证后可复用 session cookie 10 分钟，降低服务端 CPU
+- **修复**: 添加 `_authenticate()` 在 `validate_connection` 中建立 Cookie Auth 会话，`_curl` 自动附带 cookie jar。Basic Auth 仍作为 fallback
 - **参考**: [CouchDB Auth Docs](https://docs.couchdb.org/en/stable/api/server/authn.html)
 
 ### [x] #15 `generate_node_id` 理论缺陷 — ✅ 已修复
@@ -129,9 +130,10 @@
 ### [ ] #19 缺少 CI 配置
 - **问题**: 缺少 shellcheck 静态检查 + 跨平台自动化测试
 
-### [ ] #20 `sanitize_content` 命名误导
+### [x] #20 `sanitize_content` 命名误导 — ✅ 已修复
 - **位置**: L197
 - **问题**: 实际做 Tab→Space + CRLF→LF 标准化，非安全过滤
+- **修复**: 重命名为 `normalize_content`
 
 ### [ ] #21 README 中 `_purge` 未注明需要 admin 权限
 - **位置**: README.md / README.zh.md

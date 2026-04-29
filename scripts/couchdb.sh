@@ -34,8 +34,46 @@ check_dependencies() {
 }
 
 # =============================================================================
-# curl wrapper (SSL control)
+# curl wrapper (SSL control + Cookie Auth)
 # =============================================================================
+
+COOKIE_JAR=""
+
+_ensure_cookie_jar() {
+  if [[ -z "$COOKIE_JAR" ]]; then
+    COOKIE_JAR=$(mktemp "${TMPDIR:-/tmp}/couchdb_skill_XXXXXX")
+    trap 'rm -f "$COOKIE_JAR"' EXIT
+  fi
+}
+
+_authenticate() {
+  local host="$1" username="$2" password="$3"
+  _ensure_cookie_jar
+  local url="https://${host}"
+  [[ -n "${DEFAULT_PATH:-}" ]] && url="${url}/${DEFAULT_PATH}"
+  local ssl_flag=""
+  [[ "${INSECURE}" == "true" ]] && ssl_flag="-k"
+  local proxy_args=()
+  if [[ -n "${PROXY:-}" ]]; then
+    if [[ "${PROXY_TYPE}" == "http" ]]; then
+      proxy_args=(--proxy "http://${PROXY}")
+    else
+      proxy_args=(--proxy "socks5h://${PROXY}")
+    fi
+  fi
+  local result
+  result=$(curl -s $ssl_flag --connect-timeout 10 --max-time 30 \
+    ${proxy_args+"${proxy_args[@]}"} \
+    -c "$COOKIE_JAR" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"${username}\",\"password\":\"${password}\"}" \
+    "${url}/_session" 2>&1) || true
+  # Check if auth succeeded
+  if echo "$result" | jq -e '.ok == true' >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
 
 _curl() {
   local proxy_args=()
@@ -48,10 +86,14 @@ _curl() {
   fi
   local exit_code=0
   local result
+  local cookie_args=()
+  if [[ -n "$COOKIE_JAR" && -s "$COOKIE_JAR" ]]; then
+    cookie_args=(-b "$COOKIE_JAR" -c "$COOKIE_JAR")
+  fi
   if [[ "${INSECURE}" == "true" ]]; then
-    result=$(curl -sk --connect-timeout 10 --max-time 120 ${proxy_args+"${proxy_args[@]}"} "$@" 2>&1) || exit_code=$?
+    result=$(curl -sk --connect-timeout 10 --max-time 120 ${cookie_args+"${cookie_args[@]}"} ${proxy_args+"${proxy_args[@]}"} "$@" 2>&1) || exit_code=$?
   else
-    result=$(curl -s --connect-timeout 10 --max-time 120 ${proxy_args+"${proxy_args[@]}"} "$@" 2>&1) || exit_code=$?
+    result=$(curl -s --connect-timeout 10 --max-time 120 ${cookie_args+"${cookie_args[@]}"} ${proxy_args+"${proxy_args[@]}"} "$@" 2>&1) || exit_code=$?
   fi
   # Detect curl-level failures (network unreachable, timeout, DNS failure, etc.)
   if [[ $exit_code -ne 0 && ! "$result" =~ ^\{ && ! "$result" =~ ^\[ ]]; then
@@ -212,7 +254,7 @@ generate_node_id() {
 # =============================================================================
 
 encode_content_json() { printf '%s' "$1" | jq -Rs .; }
-sanitize_content()    { printf '%s' "$1" | sed 's/\r$//' | sed 's/\t/    /g'; }
+normalize_content()    { printf '%s' "$1" | sed 's/\r$//' | sed 's/\t/    /g'; }
 
 validate_content_size() {
   local size=${#1}
@@ -463,7 +505,7 @@ cmd_insert() {
   fi
 
   validate_content_size "$content" || return 1
-  content=$(sanitize_content "$content")
+  content=$(normalize_content "$content")
 
   local base_url=$(build_base_url "${HOST:-$DEFAULT_HOST}" "${HIDDEN_PATH:-$DEFAULT_PATH}" "${DATABASE:-$DEFAULT_DATABASE}")
 
@@ -526,27 +568,27 @@ _cmd_update_inner() {
 
   if [[ -n "${FILE_PATH:-}" ]]; then
     local fc=$(read_file_content "$FILE_PATH") || return 1
-    fc=$(sanitize_content "$fc"); validate_content_size "$fc" || return 1
+    fc=$(normalize_content "$fc"); validate_content_size "$fc" || return 1
     new_node=$(generate_node_id); content_for_chunk="$fc"
     final_children=$(jq -c -n --arg n "$new_node" '[$n]')
     new_size_bytes=$(calculate_size_for_livesync "$fc")
 
   elif [[ "${APPEND_MODE}" == "true" && -n "${CONTENT:-}" ]]; then
-    local ac=$(sanitize_content "$CONTENT"); validate_content_size "$ac" || return 1
+    local ac=$(normalize_content "$CONTENT"); validate_content_size "$ac" || return 1
     new_node=$(generate_node_id); content_for_chunk="$ac"
     final_children=$(echo "$current_children" | jq -c --arg new "$new_node" '. + [$new]')
     new_size_bytes=$((current_size + $(calculate_size_for_livesync "$ac")))
 
   elif [[ -n "${REPLACE_SECTION:-}" && -n "${CONTENT:-}" ]]; then
     local cur_content=$(resolve_full_content "$current" "$base_url" "$USERNAME" "$PASSWORD")
-    local rc=$(sanitize_content "$(replace_section "$cur_content" "$REPLACE_SECTION" "$CONTENT")")
+    local rc=$(normalize_content "$(replace_section "$cur_content" "$REPLACE_SECTION" "$CONTENT")")
     validate_content_size "$rc" || return 1
     new_node=$(generate_node_id); content_for_chunk="$rc"
     final_children=$(jq -c -n --arg n "$new_node" '[$n]')
     new_size_bytes=$(calculate_size_for_livesync "$rc")
 
   elif [[ "${CONTENT_SET}" == "true" ]]; then
-    local rc=$(sanitize_content "$CONTENT"); validate_content_size "$rc" || return 1
+    local rc=$(normalize_content "$CONTENT"); validate_content_size "$rc" || return 1
     new_node=$(generate_node_id); content_for_chunk="$rc"
     final_children=$(jq -c -n --arg n "$new_node" '[$n]')
     new_size_bytes=$(calculate_size_for_livesync "$rc")
@@ -631,7 +673,9 @@ validate_config() {
 
 validate_connection() {
   merge_config
-  validate_config
+  validate_config || return $?
+  # Establish Cookie Auth session (avoids per-request PBKDF2 hashing)
+  _authenticate "${DEFAULT_HOST}" "$USERNAME" "$PASSWORD" || true
 }
 
 parse_args() {
