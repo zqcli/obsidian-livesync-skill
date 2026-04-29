@@ -16,7 +16,7 @@ DOC_ID="" FILE_PATH="" CONTENT="" LIST_DIR="" CHANGES_LIMIT=""
 APPEND_MODE=false REPLACE_SECTION="" PURGE_MODE=false DELETE_DIR=""
 INSECURE=false CONTENT_SET=false
 PROXY="" PROXY_TYPE="socks5"
-COMMAND=""
+COMMAND="" BASE_URL=""
 
 # =============================================================================
 # Dependency Check
@@ -39,6 +39,17 @@ check_dependencies() {
 
 COOKIE_JAR=""
 
+_build_proxy_args() {
+  PROXY_ARGS=()
+  if [[ -n "${PROXY:-}" ]]; then
+    if [[ "${PROXY_TYPE}" == "http" ]]; then
+      PROXY_ARGS=(--proxy "http://${PROXY}")
+    else
+      PROXY_ARGS=(--proxy "socks5h://${PROXY}")
+    fi
+  fi
+}
+
 _ensure_cookie_jar() {
   if [[ -z "$COOKIE_JAR" ]]; then
     COOKIE_JAR=$(mktemp "${TMPDIR:-/tmp}/couchdb_skill_XXXXXX")
@@ -53,17 +64,10 @@ _authenticate() {
   [[ -n "${DEFAULT_PATH:-}" ]] && url="${url}/${DEFAULT_PATH}"
   local ssl_flag=""
   [[ "${INSECURE}" == "true" ]] && ssl_flag="-k"
-  local proxy_args=()
-  if [[ -n "${PROXY:-}" ]]; then
-    if [[ "${PROXY_TYPE}" == "http" ]]; then
-      proxy_args=(--proxy "http://${PROXY}")
-    else
-      proxy_args=(--proxy "socks5h://${PROXY}")
-    fi
-  fi
+  _build_proxy_args
   local result
   result=$(curl -s $ssl_flag --connect-timeout 10 --max-time 30 \
-    ${proxy_args+"${proxy_args[@]}"} \
+    ${PROXY_ARGS+"${PROXY_ARGS[@]}"} \
     -c "$COOKIE_JAR" \
     -H 'Content-Type: application/json' \
     -d "{\"name\":\"${username}\",\"password\":\"${password}\"}" \
@@ -76,14 +80,7 @@ _authenticate() {
 }
 
 _curl() {
-  local proxy_args=()
-  if [[ -n "${PROXY:-}" ]]; then
-    if [[ "${PROXY_TYPE}" == "http" ]]; then
-      proxy_args=(--proxy "http://${PROXY}")
-    else
-      proxy_args=(--proxy "socks5h://${PROXY}")
-    fi
-  fi
+  _build_proxy_args
   local exit_code=0
   local result
   local cookie_args=()
@@ -91,9 +88,9 @@ _curl() {
     cookie_args=(-b "$COOKIE_JAR" -c "$COOKIE_JAR")
   fi
   if [[ "${INSECURE}" == "true" ]]; then
-    result=$(curl -sk --connect-timeout 10 --max-time 120 ${cookie_args+"${cookie_args[@]}"} ${proxy_args+"${proxy_args[@]}"} "$@" 2>&1) || exit_code=$?
+    result=$(curl -sk --connect-timeout 10 --max-time 120 ${cookie_args+"${cookie_args[@]}"} ${PROXY_ARGS+"${PROXY_ARGS[@]}"} "$@" 2>&1) || exit_code=$?
   else
-    result=$(curl -s --connect-timeout 10 --max-time 120 ${cookie_args+"${cookie_args[@]}"} ${proxy_args+"${proxy_args[@]}"} "$@" 2>&1) || exit_code=$?
+    result=$(curl -s --connect-timeout 10 --max-time 120 ${cookie_args+"${cookie_args[@]}"} ${PROXY_ARGS+"${PROXY_ARGS[@]}"} "$@" 2>&1) || exit_code=$?
   fi
   # Detect curl-level failures (network unreachable, timeout, DNS failure, etc.)
   if [[ $exit_code -ne 0 && ! "$result" =~ ^\{ && ! "$result" =~ ^\[ ]]; then
@@ -121,24 +118,6 @@ build_base_url() {
   local url="https://${1}"
   [[ -n "${2:-}" ]] && url="${url}/${2}"
   echo "${url}/${3}"
-}
-
-check_doc_exists() {
-  local base_url="$1" doc_id="$2" username="$3" password="$4"
-  local doc_id_lower
-  doc_id_lower=$(echo "$doc_id" | tr '[:upper:]' '[:lower:]')
-  local keys_json
-  keys_json=$(jq -c -n --arg key "$doc_id_lower" '[$key]')
-  local encoded_keys
-  encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
-  local result
-  result=$(_curl -u "${username}:${password}" \
-    "${base_url}/_all_docs?keys=${encoded_keys}") || return 1
-  if echo "$result" | jq -e '.rows[0].error' >/dev/null 2>&1; then
-    echo "false"
-  else
-    echo "true"
-  fi
 }
 
 curl_get_doc() {
@@ -283,22 +262,17 @@ read_file_content() {
 # =============================================================================
 
 parse_response() {
-  local r="$1"
-  if echo "$r" | jq -e 'type == "array"' >/dev/null 2>&1; then
-    if echo "$r" | jq -e '.[0].ok == true' >/dev/null 2>&1; then
-      echo "$r" | jq -c '{success:true, rev:.[0].rev, id:.[0].id}'
-    elif echo "$r" | jq -e '.[0].error' >/dev/null 2>&1; then
-      echo "$r" | jq -c '{success:false, error:.[0].error, reason:(.[0].reason//"Unknown")}'
-    else
-      echo "$r" | jq -c '{success:true, raw:.}'
-    fi
-  elif echo "$r" | jq -e '.ok == true' >/dev/null 2>&1; then
-    echo "$r" | jq -c '{success:true, rev:.rev, id:.id}'
-  elif echo "$r" | jq -e '.error' >/dev/null 2>&1; then
-    echo "$r" | jq -c '{success:false, error:.error, reason:(.reason//"Unknown")}'
-  else
-    echo "$r" | jq -c '{success:true, raw:.}'
-  fi
+  echo "$1" | jq -c '
+    if type == "array" then
+      if .[0].ok == true then {success:true, rev:.[0].rev, id:.[0].id}
+      elif .[0].error then {success:false, error:.[0].error, reason:(.[0].reason // "Unknown")}
+      else {success:true, raw:.}
+      end
+    elif .ok == true then {success:true, rev:.rev, id:.id}
+    elif .error then {success:false, error:.error, reason:(.reason // "Unknown")}
+    else {success:true, raw:.}
+    end
+  '
 }
 
 decode_content_newlines() {
@@ -475,7 +449,7 @@ cleanup_leaf_nodes() {
 
 cmd_ping() {
   validate_connection || return 1
-  local base_url=$(build_base_url "${HOST:-$DEFAULT_HOST}" "${HIDDEN_PATH:-$DEFAULT_PATH}" "${DATABASE:-$DEFAULT_DATABASE}")
+  local base_url="$BASE_URL"
   local result
   result=$(_curl -u "${USERNAME}:${PASSWORD}" "${base_url}") || true
   if echo "$result" | jq -e '.db_name' >/dev/null 2>&1; then
@@ -507,9 +481,9 @@ cmd_insert() {
   validate_content_size "$content" || return 1
   content=$(normalize_content "$content")
 
-  local base_url=$(build_base_url "${HOST:-$DEFAULT_HOST}" "${HIDDEN_PATH:-$DEFAULT_PATH}" "${DATABASE:-$DEFAULT_DATABASE}")
+  local base_url="$BASE_URL"
 
-  [[ "$(check_doc_exists "$base_url" "$DOC_ID" "$USERNAME" "$PASSWORD")" == "true" ]] && \
+  [[ "$(curl_get_doc "$base_url" "$(echo "$DOC_ID" | tr '[:upper:]' '[:lower:]')" "$USERNAME" "$PASSWORD" | jq -e '.success == false' 2>/dev/null)" == "true" ]] || \
     { echo '{"success":false,"error":"doc_exists"}'; return 1; }
 
   local node_id=$(generate_node_id)
@@ -526,7 +500,7 @@ cmd_insert() {
 
 cmd_select() {
   validate_connection || return 1
-  local base_url=$(build_base_url "${HOST:-$DEFAULT_HOST}" "${HIDDEN_PATH:-$DEFAULT_PATH}" "${DATABASE:-$DEFAULT_DATABASE}")
+  local base_url="$BASE_URL"
 
   if [[ -n "${DOC_ID:-}" ]]; then
     local doc_id_lower=$(echo "$DOC_ID" | tr '[:upper:]' '[:lower:]')
@@ -554,7 +528,7 @@ _cmd_update_inner() {
   validate_connection || return 1
   [[ -z "${DOC_ID:-}" ]] && { echo '{"success":false,"error":"missing_doc_id"}'; return 1; }
 
-  local base_url=$(build_base_url "${HOST:-$DEFAULT_HOST}" "${HIDDEN_PATH:-$DEFAULT_PATH}" "${DATABASE:-$DEFAULT_DATABASE}")
+  local base_url="$BASE_URL"
   local doc_id_lower=$(echo "$DOC_ID" | tr '[:upper:]' '[:lower:]')
 
   local current=$(curl_get_doc "$base_url" "$doc_id_lower" "$USERNAME" "$PASSWORD")
@@ -565,36 +539,32 @@ _cmd_update_inner() {
   local current_children=$(echo "$current" | jq -c '.children // []')
   local current_size=$(echo "$current" | jq -r '.size // 0')
   local new_node content_for_chunk final_children new_size_bytes
+  new_node=$(generate_node_id)
 
+  # Resolve content based on mode
   if [[ -n "${FILE_PATH:-}" ]]; then
-    local fc=$(read_file_content "$FILE_PATH") || return 1
-    fc=$(normalize_content "$fc"); validate_content_size "$fc" || return 1
-    new_node=$(generate_node_id); content_for_chunk="$fc"
-    final_children=$(jq -c -n --arg n "$new_node" '[$n]')
-    new_size_bytes=$(calculate_size_for_livesync "$fc")
-
+    content_for_chunk=$(read_file_content "$FILE_PATH") || return 1
   elif [[ "${APPEND_MODE}" == "true" && -n "${CONTENT:-}" ]]; then
-    local ac=$(normalize_content "$CONTENT"); validate_content_size "$ac" || return 1
-    new_node=$(generate_node_id); content_for_chunk="$ac"
-    final_children=$(echo "$current_children" | jq -c --arg new "$new_node" '. + [$new]')
-    new_size_bytes=$((current_size + $(calculate_size_for_livesync "$ac")))
-
+    content_for_chunk="$CONTENT"
   elif [[ -n "${REPLACE_SECTION:-}" && -n "${CONTENT:-}" ]]; then
     local cur_content=$(resolve_full_content "$current" "$base_url" "$USERNAME" "$PASSWORD")
-    local rc=$(normalize_content "$(replace_section "$cur_content" "$REPLACE_SECTION" "$CONTENT")")
-    validate_content_size "$rc" || return 1
-    new_node=$(generate_node_id); content_for_chunk="$rc"
-    final_children=$(jq -c -n --arg n "$new_node" '[$n]')
-    new_size_bytes=$(calculate_size_for_livesync "$rc")
-
+    content_for_chunk=$(replace_section "$cur_content" "$REPLACE_SECTION" "$CONTENT")
   elif [[ "${CONTENT_SET}" == "true" ]]; then
-    local rc=$(normalize_content "$CONTENT"); validate_content_size "$rc" || return 1
-    new_node=$(generate_node_id); content_for_chunk="$rc"
-    final_children=$(jq -c -n --arg n "$new_node" '[$n]')
-    new_size_bytes=$(calculate_size_for_livesync "$rc")
-
+    content_for_chunk="$CONTENT"
   else
     echo '{"success":false,"error":"missing_content"}'; return 1
+  fi
+
+  content_for_chunk=$(normalize_content "$content_for_chunk")
+  validate_content_size "$content_for_chunk" || return 1
+
+  # Append mode: add to existing children; all others: replace
+  if [[ "${APPEND_MODE}" == "true" && -n "${CONTENT:-}" ]]; then
+    final_children=$(echo "$current_children" | jq -c --arg new "$new_node" '. + [$new]')
+    new_size_bytes=$((current_size + $(calculate_size_for_livesync "$content_for_chunk")))
+  else
+    final_children=$(jq -c -n --arg n "$new_node" '[$n]')
+    new_size_bytes=$(calculate_size_for_livesync "$content_for_chunk")
   fi
 
   local node_result=$(curl_insert_node "$base_url" "$new_node" "$(encode_content_json "$content_for_chunk")" "$USERNAME" "$PASSWORD")
@@ -615,7 +585,7 @@ cmd_update() {
 
 cmd_delete() {
   validate_connection || return 1
-  local base_url=$(build_base_url "${HOST:-$DEFAULT_HOST}" "${HIDDEN_PATH:-$DEFAULT_PATH}" "${DATABASE:-$DEFAULT_DATABASE}")
+  local base_url="$BASE_URL"
 
   if [[ -n "${DELETE_DIR:-}" ]]; then
     local list_result=$(curl_list_dir "$base_url" "$DELETE_DIR" "$USERNAME" "$PASSWORD")
@@ -674,6 +644,7 @@ validate_config() {
 validate_connection() {
   merge_config
   validate_config || return $?
+  BASE_URL=$(build_base_url "$DEFAULT_HOST" "${DEFAULT_PATH:-}" "$DEFAULT_DATABASE")
   # Establish Cookie Auth session (avoids per-request PBKDF2 hashing)
   _authenticate "${DEFAULT_HOST}" "$USERNAME" "$PASSWORD" || true
 }
