@@ -11,10 +11,10 @@
 | # | 场景 | 命令 | 期望 | 结果 |
 |---|------|------|------|------|
 | T1 | PING 正常 | `PING` | `success:true` | ✅ PASS |
-| T2 | PING DNS 失败 | `COUCHDB_HOST=bad.host PING` | 连接错误，exit 1 | ✅ PASS |
-| T3a | 缺少 HOST | 未设 COUCHDB_HOST | `missing_host` | ✅ PASS |
-| T3b | 缺少 USER | 未设 COUCHDB_USER | `missing_auth` | ✅ PASS |
-| T3c | 缺少 PASSWORD | 未设 COUCHDB_PASSWORD | `missing_auth` | ✅ PASS |
+| T2 | PING DNS 失败 | `--host bad.host PING` | 连接错误，exit 1 | ✅ PASS |
+| T3a | 缺少 HOST | 未传 `--host` | `missing_host` | ✅ PASS |
+| T3b | 缺少 USER | 未传 `--user` | `missing_auth` | ✅ PASS |
+| T3c | 缺少 PASSWORD | 未传 `--password` | `missing_auth` | ✅ PASS |
 
 ## Group 2: INSERT 测试 (T4–T8)
 

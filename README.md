@@ -11,7 +11,7 @@ This skill follows the open [Agent Skills](https://agentskills.io/) standard —
 - **INSERT** — Create documents via `--content`, `--file`, or stdin pipe
 - **SELECT** — Read documents, list directories, view recent changes
 - **UPDATE** — Full replace, append, or section-level replace with automatic 409 conflict retry
-- **DELETE** — Soft delete (preserves history) or purge (permanent removal with leaf node cleanup)
+- **DELETE** — Soft delete (LiveSync-compatible, syncs to clients)
 - **PING** — Test CouchDB connection
 
 All commands produce **JSON output** with a unified `success` field.
@@ -23,15 +23,15 @@ All commands produce **JSON output** with a unified `success` field.
 
 ## Configuration
 
-Set environment variables or pass CLI flags:
+All configuration is provided via CLI flags (no environment variables):
 
-| Variable | CLI Flag | Required | Description |
-|---|---|---|---|
-| `COUCHDB_HOST` | `--host` | Yes | Host with port, e.g. `obs.example.com:8443` |
-| `COUCHDB_USER` | `--user` | Yes | CouchDB username |
-| `COUCHDB_PASSWORD` | `--password` | Yes | CouchDB password |
-| `COUCHDB_DATABASE` | `--database` | Yes | Database name, e.g. `obsinote` |
-| `COUCHDB_PATH` | `--path` | No | Hidden path prefix, e.g. `/e=_9f3k2a` |
+| CLI Flag | Required | Description |
+|---|---|---|
+| `--host` | Yes | Host with port, e.g. `obs.example.com:8443` |
+| `--user` | Yes | CouchDB username |
+| `--password` | Yes | CouchDB password |
+| `--database` | Yes | Database name, e.g. `obsinote` |
+| `--path` | No | Hidden path prefix, e.g. `/e=_9f3k2a` |
 
 ### Proxy & SSL (CLI only)
 

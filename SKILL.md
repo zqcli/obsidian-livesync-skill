@@ -27,17 +27,15 @@ synchronization (no sync errors on the Obsidian side).
 
 ## Prerequisites
 
-Set these environment variables before use:
+All configuration is provided via CLI flags (no environment variables):
 
-| Variable | Required | Description |
+| Flag | Required | Description |
 |---|---|---|
-| `COUCHDB_HOST` | Yes | Host with port, e.g. `obs.example.com:8443` |
-| `COUCHDB_USER` | Yes | CouchDB username |
-| `COUCHDB_PASSWORD` | Yes | CouchDB password |
-| `COUCHDB_DATABASE` | Yes | Database name, e.g. `obsinote` |
-| `COUCHDB_PATH` | No | Hidden path prefix, e.g. `/e=_9f3k2a` |
-
-Alternatively, pass credentials via CLI flags: `--user`, `--password`, `--host`, `--path`, `--database`.
+| `--host` | Yes | Host with port, e.g. `obs.example.com:8443` |
+| `--user` | Yes | CouchDB username |
+| `--password` | Yes | CouchDB password |
+| `--database` | Yes | Database name, e.g. `obsinote` |
+| `--path` | No | Hidden path prefix, e.g. `/e=_9f3k2a` |
 
 ### Proxy & SSL (CLI only)
 

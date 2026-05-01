@@ -11,7 +11,7 @@
 - **INSERT** — 通过 `--content`、`--file` 或 stdin 管道创建文档
 - **SELECT** — 读取文档、列出目录结构、查看最近变更
 - **UPDATE** — 全量替换、追加内容、按标题段落替换，内置 409 冲突自动重试
-- **DELETE** — 软删除（保留历史）或 purge 永久删除（清理 leaf node 和冲突版本）
+- **DELETE** — 软删除（LiveSync 兼容，同步到客户端）
 - **PING** — 测试 CouchDB 连接
 
 所有命令统一输出 **JSON**，通过 `success` 字段标识成功/失败。
@@ -23,15 +23,15 @@
 
 ## 配置
 
-通过环境变量或 CLI 参数设置：
+所有配置通过 CLI 参数传递（不支持环境变量）：
 
-| 环境变量 | CLI 参数 | 必填 | 说明 |
-|---|---|---|---|
-| `COUCHDB_HOST` | `--host` | 是 | 主机和端口，如 `obs.example.com:8443` |
-| `COUCHDB_USER` | `--user` | 是 | CouchDB 用户名 |
-| `COUCHDB_PASSWORD` | `--password` | 是 | CouchDB 密码 |
-| `COUCHDB_DATABASE` | `--database` | 是 | 数据库名称，如 `obsinote` |
-| `COUCHDB_PATH` | `--path` | 否 | 隐藏路径前缀，如 `/e=_9f3k2a` |
+| CLI 参数 | 必填 | 说明 |
+|---|---|---|
+| `--host` | 是 | 主机和端口，如 `obs.example.com:8443` |
+| `--user` | 是 | CouchDB 用户名 |
+| `--password` | 是 | CouchDB 密码 |
+| `--database` | 是 | 数据库名称，如 `obsinote` |
+| `--path` | 否 | 隐藏路径前缀，如 `/e=_9f3k2a` |
 
 ### 代理与 SSL（仅 CLI）
 

@@ -5,13 +5,10 @@ set -euo pipefail
 # Obsidian LiveSync CouchDB CRUD Tool
 # =============================================================================
 
-DEFAULT_HOST="${COUCHDB_HOST:-}"        # env var fallback for --host
-DEFAULT_PATH="${COUCHDB_PATH:-}"        # env var fallback for --path
-DEFAULT_DATABASE="${COUCHDB_DATABASE:-}" # env var fallback for --database
 MAX_RETRIES=3
 NODE_ID_PREFIX="h:"
 
-# CLI-parsed values (override env vars when provided)
+# CLI-parsed values (all config must be provided via CLI flags)
 HOST="" HIDDEN_PATH="" USERNAME="" PASSWORD="" DATABASE=""
 DOC_ID="" FILE_PATH="" CONTENT="" LIST_DIR="" CHANGES_LIMIT=""
 APPEND_MODE=false REPLACE_SECTION="" DELETE_DIR=""
@@ -47,7 +44,7 @@ _authenticate() {
     trap 'rm -f "$COOKIE_JAR"' EXIT
   fi
   local url="https://${host}"
-  [[ -n "${DEFAULT_PATH:-}" ]] && url="${url}/${DEFAULT_PATH}"
+  [[ -n "${HIDDEN_PATH:-}" ]] && url="${url}/${HIDDEN_PATH}"
   local ssl_flag=""
   [[ "${INSECURE}" == "true" ]] && ssl_flag="-k"
   local result
@@ -619,34 +616,23 @@ cmd_delete() {
 # CLI
 # =============================================================================
 
-merge_config() {
-  # Merge env vars as fallback for CLI flags
-  [[ -z "${USERNAME:-}" && -n "${COUCHDB_USER:-}" ]] && USERNAME="$COUCHDB_USER"
-  [[ -z "${PASSWORD:-}" && -n "${COUCHDB_PASSWORD:-}" ]] && PASSWORD="$COUCHDB_PASSWORD"
-  # CLI --host/--path/--database override env vars
-  [[ -n "${HOST:-}" ]] && DEFAULT_HOST="$HOST"
-  [[ -n "${HIDDEN_PATH:-}" ]] && DEFAULT_PATH="$HIDDEN_PATH"
-  [[ -n "${DATABASE:-}" ]] && DEFAULT_DATABASE="$DATABASE"
-}
-
 validate_config() {
   [[ -n "${USERNAME:-}" && -n "${PASSWORD:-}" ]] || \
-    { echo '{"success":false,"error":"missing_auth","reason":"Provide --user/--password or set COUCHDB_USER/COUCHDB_PASSWORD env vars"}'; return 1; }
-  [[ -n "${DEFAULT_HOST:-}" ]] || \
-    { echo '{"success":false,"error":"missing_host","reason":"Provide --host or set COUCHDB_HOST env var"}'; return 1; }
-  [[ -n "${DEFAULT_DATABASE:-}" ]] || \
-    { echo '{"success":false,"error":"missing_database","reason":"Provide --database or set COUCHDB_DATABASE env var"}'; return 1; }
+    { echo '{"success":false,"error":"missing_auth","reason":"Provide --user and --password"}'; return 1; }
+  [[ -n "${HOST:-}" ]] || \
+    { echo '{"success":false,"error":"missing_host","reason":"Provide --host"}'; return 1; }
+  [[ -n "${DATABASE:-}" ]] || \
+    { echo '{"success":false,"error":"missing_database","reason":"Provide --database"}'; return 1; }
 }
 
 validate_connection() {
-  merge_config
   validate_config || return $?
-  # Build base URL inline (was: build_base_url)
-  local url="https://${DEFAULT_HOST}"
-  [[ -n "${DEFAULT_PATH:-}" ]] && url="${url}/${DEFAULT_PATH}"
-  BASE_URL="${url}/${DEFAULT_DATABASE}"
+  # Build base URL
+  local url="https://${HOST}"
+  [[ -n "${HIDDEN_PATH:-}" ]] && url="${url}/${HIDDEN_PATH}"
+  BASE_URL="${url}/${DATABASE}"
   # Establish Cookie Auth session (avoids per-request PBKDF2 hashing)
-  _authenticate "${DEFAULT_HOST}" "$USERNAME" "$PASSWORD" || true
+  _authenticate "${HOST}" "$USERNAME" "$PASSWORD" || true
 }
 
 parse_args() {
@@ -692,10 +678,11 @@ Commands:
   DELETE    Remove document(s)
 
 Connection (all commands):
-  --user/--password   Auth (env: COUCHDB_USER / COUCHDB_PASSWORD)
-  --host              Host (env: COUCHDB_HOST)
-  --path              Hidden path (env: COUCHDB_PATH)
-  --database          Database (env: COUCHDB_DATABASE)
+  --user USERNAME     CouchDB username (required)
+  --password PASSWORD CouchDB password (required)
+  --host HOST         Host with port, e.g. obs.example.com:8443 (required)
+  --path PATH         Hidden path prefix, e.g. /e=_9f3k2a
+  --database DB       Database name (required)
   --insecure          Skip SSL certificate verification (default: verify)
   --proxy PROXY       Proxy with scheme, e.g. socks5://host:port or http://host:port
 
