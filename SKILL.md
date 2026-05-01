@@ -6,14 +6,14 @@ description: >
   Use when the user wants to create, read, update, or delete notes, journal entries,
   or any Markdown documents in their Obsidian vault without having Obsidian installed.
   Supports stdin pipe input, file input, env var authentication, automatic write conflict retry,
-  and leaf node cleanup on purge.
+  and leaf node cleanup on soft delete.
 license: MIT
 compatibility: >
   Requires curl and jq. Needs network access to a
   CouchDB instance with Obsidian LiveSync configured.
 metadata:
   author: https://github.com/zqcli
-  version: "1.3.0"
+  version: "1.4.0"
 allowed-tools: Bash(scripts/couchdb.sh:*)
 ---
 
@@ -39,16 +39,16 @@ Set these environment variables before use:
 
 Alternatively, pass credentials via CLI flags: `--user`, `--password`, `--host`, `--path`, `--database`.
 
-### Proxy (CLI only)
+### Proxy & SSL (CLI only)
 
-| Flag | Default | Description |
-|---|---|---|
-| `--proxy` | none | Proxy address, format `host:port` |
-| `--proxy-type` | socks5 | Proxy type: `socks5` or `http` |
+| Flag | Description |
+|---|---|
+| `--proxy` | Proxy with scheme prefix: `socks5://host:port` or `http://host:port` |
+| `--insecure` | Skip SSL certificate verification (default: verify) |
 
 ```bash
-bash scripts/couchdb.sh PING --proxy 127.0.0.1:12080
-bash scripts/couchdb.sh PING --proxy proxy.corp.com:8080 --proxy-type http
+bash scripts/couchdb.sh PING --proxy socks5://127.0.0.1:12080
+bash scripts/couchdb.sh PING --proxy http://proxy.corp.com:8080
 ```
 
 ## Commands
@@ -123,29 +123,21 @@ UPDATE automatically retries up to 3 times on CouchDB 409 conflicts.
 # Soft delete (preserves history, standard Obsidian behavior)
 bash scripts/couchdb.sh DELETE --doc-id "AgentMemory/note.md"
 
-# Purge (permanently removes document + leaf nodes, irreversible)
-bash scripts/couchdb.sh DELETE --doc-id "AgentMemory/note.md" --purge
-
 # Delete entire directory
 bash scripts/couchdb.sh DELETE --delete-dir "AgentMemory/temp"
-
-# Purge entire directory
-bash scripts/couchdb.sh DELETE --delete-dir "AgentMemory/temp" --purge
 ```
 
 Soft delete output: `{"success":true,"rev":"...","id":"..."}`
-Purge output: `{"success":true,"id":"...","purged":true}`
 Directory output: `{"success":true,"directory":"...","deleted_count":N}`
 
 ## Important Notes
 
 - **Document IDs** are case-insensitive (stored as lowercase). Path casing is preserved in the `path` field.
 - **`--replace-section`** matches any header level (`#` through `######`). It preserves the header line and replaces only the content below it, until the next header of equal or higher level.
-- **Soft delete** is the standard Obsidian behavior. Use **purge** only when you want to permanently remove all traces.
+- **Soft delete** is the standard Obsidian behavior. Deleted documents are marked with `deleted:true` and propagate to Obsidian clients via LiveSync replication.
 - **Content** can be provided via `--content`, `--file`, or stdin pipe. Priority: `--file` > `--content` > stdin.
 - All output is JSON. On success, the `success` field is `true`. On failure, `success` is `false` with `error` and `reason` fields.
 - SSL certificate verification is **enabled by default**. Use `--insecure` to skip (e.g. self-signed certs).
-- `--purge` requires CouchDB server admin privileges.
 - Connection timeout is 10 seconds; max request time is 120 seconds.
 
 ## Edge Cases

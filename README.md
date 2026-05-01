@@ -33,18 +33,16 @@ Set environment variables or pass CLI flags:
 | `COUCHDB_DATABASE` | `--database` | Yes | Database name, e.g. `obsinote` |
 | `COUCHDB_PATH` | `--path` | No | Hidden path prefix, e.g. `/e=_9f3k2a` |
 
-### Proxy (CLI only)
+### Proxy & SSL (CLI only)
 
-| Flag | Default | Description |
-|---|---|---|
-| `--proxy` | none | Proxy address, format `host:port` |
-| `--proxy-type` | socks5 | Proxy type: `socks5` or `http` |
-| `--insecure` | off | Skip SSL certificate verification |
-| `--verify-ssl` | on | Enable SSL certificate verification (default) |
+| Flag | Description |
+|---|---|
+| `--proxy` | Proxy with scheme prefix: `socks5://host:port` or `http://host:port` |
+| `--insecure` | Skip SSL certificate verification (default: verify) |
 
 ```bash
-bash scripts/couchdb.sh PING --proxy 127.0.0.1:12080
-bash scripts/couchdb.sh PING --proxy proxy.corp.com:8080 --proxy-type http
+bash scripts/couchdb.sh PING --proxy socks5://127.0.0.1:12080
+bash scripts/couchdb.sh PING --proxy http://proxy.corp.com:8080
 ```
 
 ## Usage
@@ -95,11 +93,8 @@ bash scripts/couchdb.sh UPDATE --doc-id "Notes/hello.md" --replace-section "## S
 ### Delete a Document
 
 ```bash
-# Soft delete (standard Obsidian behavior)
+# Soft delete (standard Obsidian behavior, syncs to clients)
 bash scripts/couchdb.sh DELETE --doc-id "Notes/hello.md"
-
-# Purge (permanent, irreversible)
-bash scripts/couchdb.sh DELETE --doc-id "Notes/hello.md" --purge
 
 # Delete entire directory
 bash scripts/couchdb.sh DELETE --delete-dir "Notes/temp"
@@ -114,6 +109,7 @@ bash scripts/couchdb.sh DELETE --delete-dir "Notes/temp"
 - `--database` is **required** for all commands. Without it, the script returns `{"success":false,"error":"missing_database"}`.
 - When network is unreachable, the script returns structured JSON errors (e.g. `{"success":false,"error":"connection_failed","reason":"Connection timed out"}`) instead of silent failures.
 - SSL certificate verification is **enabled by default**. Use `--insecure` to skip verification (e.g. for self-signed certificates).
+- All DELETE operations are **soft deletes** (LiveSync-compatible `deleted:true`), ensuring Obsidian clients sync deletions correctly.
 
 ## License
 

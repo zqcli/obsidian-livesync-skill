@@ -9,14 +9,14 @@ DEFAULT_HOST="${COUCHDB_HOST:-}"        # env var fallback for --host
 DEFAULT_PATH="${COUCHDB_PATH:-}"        # env var fallback for --path
 DEFAULT_DATABASE="${COUCHDB_DATABASE:-}" # env var fallback for --database
 MAX_RETRIES=3
+NODE_ID_PREFIX="h:"
 
 # CLI-parsed values (override env vars when provided)
 HOST="" HIDDEN_PATH="" USERNAME="" PASSWORD="" DATABASE=""
 DOC_ID="" FILE_PATH="" CONTENT="" LIST_DIR="" CHANGES_LIMIT=""
-APPEND_MODE=false REPLACE_SECTION="" PURGE_MODE=false DELETE_DIR=""
+APPEND_MODE=false REPLACE_SECTION="" DELETE_DIR=""
 INSECURE=false CONTENT_SET=false
-PROXY="" PROXY_TYPE="socks5"
-COMMAND="" BASE_URL=""
+PROXY="" COMMAND="" BASE_URL=""
 
 # =============================================================================
 # Dependency Check
@@ -39,35 +39,31 @@ check_dependencies() {
 
 COOKIE_JAR=""
 
-_build_proxy_args() {
-  PROXY_ARGS=()
-  if [[ -n "${PROXY:-}" ]]; then
-    if [[ "${PROXY_TYPE}" == "http" ]]; then
-      PROXY_ARGS=(--proxy "http://${PROXY}")
-    else
-      PROXY_ARGS=(--proxy "socks5h://${PROXY}")
-    fi
-  fi
-}
-
-_ensure_cookie_jar() {
+_authenticate() {
+  local host="$1" username="$2" password="$3"
+  # Ensure cookie jar exists
   if [[ -z "$COOKIE_JAR" ]]; then
     COOKIE_JAR=$(mktemp "${TMPDIR:-/tmp}/couchdb_skill_XXXXXX")
     trap 'rm -f "$COOKIE_JAR"' EXIT
   fi
-}
-
-_authenticate() {
-  local host="$1" username="$2" password="$3"
-  _ensure_cookie_jar
   local url="https://${host}"
   [[ -n "${DEFAULT_PATH:-}" ]] && url="${url}/${DEFAULT_PATH}"
   local ssl_flag=""
   [[ "${INSECURE}" == "true" ]] && ssl_flag="-k"
-  _build_proxy_args
   local result
+  # Build proxy args for auth request
+  local proxy_args=()
+  if [[ -n "${PROXY:-}" ]]; then
+    local proxy_scheme="${PROXY%%://*}"
+    local proxy_host="${PROXY#*://}"
+    case "$proxy_scheme" in
+      socks5) proxy_args=(--proxy "socks5h://${proxy_host}") ;;
+      http)   proxy_args=(--proxy "http://${proxy_host}") ;;
+      *)      echo "{\"success\":false,\"error\":\"invalid_proxy\",\"reason\":\"Proxy must use socks5:// or http:// prefix, got: ${proxy_scheme}://\"}" >&2; return 1 ;;
+    esac
+  fi
   result=$(curl -s $ssl_flag --connect-timeout 10 --max-time 30 \
-    ${PROXY_ARGS+"${PROXY_ARGS[@]}"} \
+    ${proxy_args+"${proxy_args[@]}"} \
     -c "$COOKIE_JAR" \
     -H 'Content-Type: application/json' \
     -d "{\"name\":\"${username}\",\"password\":\"${password}\"}" \
@@ -80,17 +76,27 @@ _authenticate() {
 }
 
 _curl() {
-  _build_proxy_args
   local exit_code=0
   local result
   local cookie_args=()
   if [[ -n "$COOKIE_JAR" && -s "$COOKIE_JAR" ]]; then
     cookie_args=(-b "$COOKIE_JAR" -c "$COOKIE_JAR")
   fi
+  # Build proxy args inline
+  local proxy_args=()
+  if [[ -n "${PROXY:-}" ]]; then
+    local proxy_scheme="${PROXY%%://*}"
+    local proxy_host="${PROXY#*://}"
+    case "$proxy_scheme" in
+      socks5) proxy_args=(--proxy "socks5h://${proxy_host}") ;;
+      http)   proxy_args=(--proxy "http://${proxy_host}") ;;
+      *)      echo "{\"success\":false,\"error\":\"invalid_proxy\",\"reason\":\"Proxy must use socks5:// or http:// prefix, got: ${proxy_scheme}://\"}" >&2; return 1 ;;
+    esac
+  fi
   if [[ "${INSECURE}" == "true" ]]; then
-    result=$(curl -sk --connect-timeout 10 --max-time 120 ${cookie_args+"${cookie_args[@]}"} ${PROXY_ARGS+"${PROXY_ARGS[@]}"} "$@" 2>&1) || exit_code=$?
+    result=$(curl -sk --connect-timeout 10 --max-time 120 ${cookie_args+"${cookie_args[@]}"} ${proxy_args+"${proxy_args[@]}"} "$@" 2>&1) || exit_code=$?
   else
-    result=$(curl -s --connect-timeout 10 --max-time 120 ${cookie_args+"${cookie_args[@]}"} ${PROXY_ARGS+"${PROXY_ARGS[@]}"} "$@" 2>&1) || exit_code=$?
+    result=$(curl -s --connect-timeout 10 --max-time 120 ${cookie_args+"${cookie_args[@]}"} ${proxy_args+"${proxy_args[@]}"} "$@" 2>&1) || exit_code=$?
   fi
   # Detect curl-level failures (network unreachable, timeout, DNS failure, etc.)
   if [[ $exit_code -ne 0 && ! "$result" =~ ^\{ && ! "$result" =~ ^\[ ]]; then
@@ -114,14 +120,9 @@ _curl() {
 # Connection
 # =============================================================================
 
-build_base_url() {
-  local url="https://${1}"
-  [[ -n "${2:-}" ]] && url="${url}/${2}"
-  echo "${url}/${3}"
-}
-
 curl_get_doc() {
   local base_url="$1" doc_id="$2" username="$3" password="$4"
+  # Fetch document via _all_docs
   local keys_json
   keys_json=$(jq -c -n --arg key "$doc_id" '[$key]')
   local encoded_keys
@@ -129,13 +130,12 @@ curl_get_doc() {
   local result
   result=$(_curl -u "${username}:${password}" \
     "${base_url}/_all_docs?include_docs=true&keys=${encoded_keys}") || return 1
-  # Handle CouchDB _deleted:true tombstones (value.deleted=true)
+  # Interpret response: distinguish normal doc, tombstone, and not_found
   if echo "$result" | jq -e '.rows[0].value.deleted == true' >/dev/null 2>&1; then
     echo "$result" | jq -c '{success:false, error:"couchdb_tombstone", _rev:.rows[0].value.rev, _id:.rows[0].id}'
   elif echo "$result" | jq -e '.rows[0].doc' >/dev/null 2>&1; then
     echo "$result" | jq '.rows[0].doc'
   elif echo "$result" | jq -e '.rows[0].value.rev and (.rows[0].doc == null)' >/dev/null 2>&1; then
-    # Ghost doc: index entry exists but doc data is gone (post-purge/compaction artifact)
     echo "$result" | jq -c '{success:false, error:"couchdb_tombstone", _rev:.rows[0].value.rev, _id:.rows[0].id}'
   elif echo "$result" | jq -e '.rows[0].error' >/dev/null 2>&1; then
     echo "$result" | jq -c '{success:false, error:.rows[0].error, reason:(.rows[0].reason // null)}'
@@ -145,14 +145,18 @@ curl_get_doc() {
 }
 
 curl_insert_doc() {
-  _curl -u "${4}:${5}" -X POST -H 'Content-Type: application/json' -d "$3" "$1"
+  local base_url="$1" doc_id="$2" doc_json="$3" username="$4" password="$5"
+  _curl -u "${username}:${password}" -X POST -H 'Content-Type: application/json' -d "$doc_json" "$base_url"
 }
 
 curl_update_doc() {
-  local doc_with_rev=$(echo "$4" | jq --arg rev "$3" '. + {_rev: $rev}')
-  local bulk_json=$(jq -c -n --argjson docs "[${doc_with_rev}]" '{docs: $docs}')
-  _curl -u "${5}:${6}" -X POST -H 'Content-Type: application/json' \
-    -d "$bulk_json" "${1}/_bulk_docs"
+  local base_url="$1" doc_id="$2" rev="$3" doc_json="$4" username="$5" password="$6"
+  local doc_with_rev
+  doc_with_rev=$(echo "$doc_json" | jq --arg rev "$rev" '. + {_rev: $rev}')
+  local bulk_json
+  bulk_json=$(jq -c -n --argjson docs "[${doc_with_rev}]" '{docs: $docs}')
+  _curl -u "${username}:${password}" -X POST -H 'Content-Type: application/json' \
+    -d "$bulk_json" "${base_url}/_bulk_docs"
 }
 
 curl_insert_node() {
@@ -164,16 +168,18 @@ curl_insert_node() {
 }
 
 curl_list_dir() {
-  local prefix=$(echo "$2" | tr '[:upper:]' '[:lower:]' | sed 's|/$||')
-  local startkey=$(jq -n --arg p "${prefix}/" '$p')
-  local endkey=$(jq -n --arg p "${prefix}/" '$p + "\uffff"')
-  local enc_start=$(jq -rn --arg v "$startkey" '$v|@uri')
-  local enc_end=$(jq -rn --arg v "$endkey" '$v|@uri')
-  _curl -u "${3}:${4}" "${1}/_all_docs?startkey=${enc_start}&endkey=${enc_end}&include_docs=true"
-}
-
-curl_list_all() {
-  _curl -u "${2}:${3}" "${1}/_all_docs?include_docs=true"
+  local base_url="$1" prefix="$2" username="$3" password="$4"
+  prefix=$(to_lower "$prefix" | sed 's|/$||')
+  if [[ -z "$prefix" ]]; then
+    # No prefix: list all documents
+    _curl -u "${username}:${password}" "${base_url}/_all_docs?include_docs=true"
+  else
+    local startkey=$(jq -n --arg p "${prefix}/" '$p')
+    local endkey=$(jq -n --arg p "${prefix}/" '$p + "\uffff"')
+    local enc_start=$(jq -rn --arg v "$startkey" '$v|@uri')
+    local enc_end=$(jq -rn --arg v "$endkey" '$v|@uri')
+    _curl -u "${username}:${password}" "${base_url}/_all_docs?startkey=${enc_start}&endkey=${enc_end}&include_docs=true"
+  fi
 }
 
 curl_changes() {
@@ -195,45 +201,11 @@ curl_delete_doc_soft() {
     -d "$bulk_json" "${base_url}/_bulk_docs"
 }
 
-curl_delete_doc_purge() {
-  local base_url="$1" doc_id="$2" rev="$3" username="$4" password="$5"
-  # Get all leaf revisions (including conflicts) to purge completely
-  local encoded_id
-  encoded_id=$(jq -rn --arg v "$doc_id" '$v|@uri')
-  local doc_info
-  doc_info=$(_curl -u "${username}:${password}" \
-    "${base_url}/${encoded_id}?conflicts=true") || return 1
-  local all_revs
-  if echo "$doc_info" | jq -e '._conflicts' >/dev/null 2>&1; then
-    all_revs=$(echo "$doc_info" | jq -c '[._rev] + ._conflicts')
-  else
-    all_revs=$(jq -c -n --arg rev "$rev" '[$rev]')
-  fi
-  local purge_json
-  purge_json=$(jq -c -n --arg id "$doc_id" --argjson revs "$all_revs" '{($id): $revs}')
-  local purge_result
-  purge_result=$(_curl -u "${username}:${password}" -X POST -H 'Content-Type: application/json' \
-    -d "$purge_json" "${base_url}/_purge") || return 1
-  if echo "$purge_result" | jq -e '.purged' >/dev/null 2>&1; then
-    echo "$purge_result" | jq -c --arg id "$doc_id" '{success:true, id:$id, purged:true}'
-  else
-    echo "$purge_result" | jq -c '{success:false, error:.error, reason:.reason}'
-  fi
-}
-
-curl_delete_node() {
-  local base_url="$1" node_id="$2" username="$3" password="$4"
-  local node
-  node=$(_curl -u "${username}:${password}" "${base_url}/${node_id}") || return 0
-  local node_rev=$(echo "$node" | jq -r '._rev // empty' 2>/dev/null)
-  [[ -z "$node_rev" ]] && return 0
-  _curl -u "${username}:${password}" -X DELETE \
-    "${base_url}/${node_id}?rev=${node_rev}" >/dev/null 2>&1
-}
-
 # =============================================================================
 # Path & Encoding
 # =============================================================================
+
+to_lower() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 
 generate_node_id() {
   local id
@@ -241,7 +213,7 @@ generate_node_id() {
   while [[ ${#id} -lt 13 ]]; do
     id+=$(LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c $((13 - ${#id})))
   done
-  echo "h:${id}"
+  echo "${NODE_ID_PREFIX}${id}"
 }
 
 # =============================================================================
@@ -250,6 +222,23 @@ generate_node_id() {
 
 encode_content_json() { printf '%s' "$1" | jq -Rs .; }
 normalize_content()    { printf '%s' "$1" | sed 's/\r$//' | sed 's/\t/    /g'; }
+
+resolve_input_content() {
+  if [[ -n "${FILE_PATH:-}" ]]; then
+    if [[ -f "$FILE_PATH" ]]; then
+      cat "$FILE_PATH"
+    else
+      echo '{"success":false,"error":"file_not_found","reason":"'"$FILE_PATH"'"}' >&2
+      return 1
+    fi
+  elif [[ "${CONTENT_SET}" == "true" ]]; then
+    printf '%s' "$CONTENT"
+  elif [[ ! -t 0 ]]; then
+    cat
+  else
+    echo '{"success":false,"error":"missing_content"}'; return 1
+  fi
+}
 
 validate_content_size() {
   local size=${#1}
@@ -264,18 +253,12 @@ calculate_size_for_livesync() {
   printf '%s' "$1" | jq -sRj 'sub("\n+$";"")' | wc -c | tr -d ' '
 }
 
-read_file_content() {
-  if [[ -f "$1" ]]; then
-    cat "$1"
-  else
-    echo '{"success":false,"error":"file_not_found","reason":"'"$1"'"}' >&2
-    return 1
-  fi
-}
-
 # =============================================================================
 # Response Parsing
 # =============================================================================
+
+has_error() { echo "$1" | jq -e '.error' >/dev/null 2>&1; }
+is_deleted() { echo "$1" | jq -e '.deleted == true' >/dev/null 2>&1; }
 
 parse_response() {
   echo "$1" | jq -c '
@@ -320,20 +303,16 @@ format_select_result() {
     '{success:true,id:._id,path:.path,ctime:.ctime,mtime:.mtime,size:.size,content:$c,children:.children}' <<< "$1"
 }
 
-format_list_result() {
-  echo "$1" | jq -c '[.rows[] | {id:.id, rev:.value.rev}]'
-}
-
 format_dir_listing() {
   local raw_result="$1" prefix="$2"
   # Lowercase and normalize prefix: add trailing / if non-empty
-  prefix=$(echo "$prefix" | tr '[:upper:]' '[:lower:]')
+  prefix=$(to_lower "$prefix")
   [[ -n "$prefix" && "$prefix" != */ ]] && prefix="${prefix}/"
-  echo "$raw_result" | jq -c --arg prefix "$prefix" '
+  echo "$raw_result" | jq -c --arg prefix "$prefix" --arg node_prefix "$NODE_ID_PREFIX" '
     [.rows[]
      | select(.doc.deleted != true)
      | .id
-     | select(startswith("h:") | not)
+     | select(startswith($node_prefix) | not)
      | select(startswith("_") | not)
     ]
     | if $prefix != "" then map(select(startswith($prefix)) | ltrimstr($prefix)) else . end
@@ -357,24 +336,9 @@ format_changes_result() {
 # Document Building
 # =============================================================================
 
-resolve_latest_rev() {
-  local base_url="$1" doc_id="$2" username="$3" password="$4"
-  local keys_json
-  keys_json=$(jq -c -n --arg key "$doc_id" '[$key]')
-  local encoded_keys
-  encoded_keys=$(jq -rn --arg v "$keys_json" '$v|@uri')
-  local result
-  result=$(_curl -u "${username}:${password}" "${base_url}/_all_docs?keys=${encoded_keys}") || return 1
-  if echo "$result" | jq -e '.rows[0].value.rev' >/dev/null 2>&1; then
-    echo "$result" | jq -r '.rows[0].value.rev'
-  else
-    echo '{"success":false,"error":"rev_not_found","reason":"Could not resolve revision for document"}' >&2; return 1
-  fi
-}
-
 build_doc_json_for_insert() {
   local doc_id="$1" node_id="$2" timestamp="$3" content="$4"
-  local id_lower=$(echo "$doc_id" | tr '[:upper:]' '[:lower:]')
+  local id_lower=$(to_lower "$doc_id")
   local size=$(printf '%s' "$content" | jq -sRj 'sub("\n+$";"")' | wc -c | tr -d ' ')
   local children=$(jq -c -n --arg n "$node_id" '[$n]')
   jq -c -n --arg id "$id_lower" --arg path "$doc_id" --argjson children "$children" \
@@ -443,22 +407,14 @@ retry_on_conflict() {
       attempt=$((attempt + 1))
       [[ $attempt -lt $MAX_RETRIES ]] && sleep 0.5
     else
-      echo "$result"; return
+      echo "$result"
+      # Propagate failure exit code for non-conflict errors
+      echo "$result" | jq -e '.success == false' >/dev/null 2>&1 && return 1
+      return 0
     fi
   done
   echo '{"success":false,"error":"conflict","reason":"Max retries ('$MAX_RETRIES') exceeded"}'
-}
-
-# =============================================================================
-# Leaf Node Cleanup (for purge operations)
-# =============================================================================
-
-cleanup_leaf_nodes() {
-  local base_url="$1" doc_json="$2" username="$3" password="$4"
-  local children=$(echo "$doc_json" | jq -r '.children[]? // empty' 2>/dev/null)
-  for node_id in $children; do
-    curl_delete_node "$base_url" "$node_id" "$username" "$password" || true
-  done
+  return 1
 }
 
 # =============================================================================
@@ -472,7 +428,7 @@ cmd_ping() {
   result=$(_curl -u "${USERNAME}:${PASSWORD}" "${base_url}") || true
   if echo "$result" | jq -e '.db_name' >/dev/null 2>&1; then
     echo "$result" | jq -c '{success:true, db_name:.db_name, doc_count:.doc_count, update_seq:.update_seq}'
-  elif echo "$result" | jq -e '.error' >/dev/null 2>&1; then
+  elif has_error "$result"; then
     echo "$result"
     return 1
   else
@@ -486,68 +442,31 @@ cmd_insert() {
   [[ -z "${DOC_ID:-}" ]] && { echo '{"success":false,"error":"missing_doc_id"}'; return 1; }
 
   local content
-  if [[ -n "${FILE_PATH:-}" ]]; then
-    content=$(read_file_content "$FILE_PATH") || return 1
-  elif [[ "${CONTENT_SET}" == "true" ]]; then
-    content="$CONTENT"
-  elif [[ ! -t 0 ]]; then
-    content=$(cat)
-  else
-    echo '{"success":false,"error":"missing_content"}'; return 1
-  fi
+  content=$(resolve_input_content) || { [[ -n "$content" ]] && echo "$content"; return 1; }
 
   validate_content_size "$content" || return 1
   content=$(normalize_content "$content")
 
   local base_url="$BASE_URL"
-  local doc_id_lower=$(echo "$DOC_ID" | tr '[:upper:]' '[:lower:]')
+  local doc_id_lower=$(to_lower "$DOC_ID")
   local existing=$(curl_get_doc "$base_url" "$doc_id_lower" "$USERNAME" "$PASSWORD")
 
   local node_id=$(generate_node_id)
   local encoded=$(encode_content_json "$content")
 
-  if echo "$existing" | jq -e '.error == "couchdb_tombstone"' >/dev/null 2>&1; then
-    # CouchDB tombstone or ghost doc: purge all layers, then re-check
-    local _ts_id=$(echo "$existing" | jq -r '._id')
-    local _ts_rev=$(echo "$existing" | jq -r '._rev')
-    local _purge_json
-    local _max_purge=20
-    while [[ $_max_purge -gt 0 ]]; do
-      _max_purge=$((_max_purge - 1))
-      _purge_json=$(jq -c -n --arg id "$_ts_id" --arg rev "$_ts_rev" '{($id): [$rev]}')
-      _curl -u "${USERNAME}:${PASSWORD}" -X POST -H 'Content-Type: application/json' \
-        -d "$_purge_json" "${base_url}/_purge" >/dev/null 2>&1
-      # Check if more tombstone/ghost layers remain
-      local _check=$(_curl -u "${USERNAME}:${PASSWORD}" -X POST -H 'Content-Type: application/json' \
-        -d "{\"keys\":[\"$_ts_id\"]}" "${base_url}/_all_docs?include_docs=true" 2>/dev/null)
-      local _next_rev=$(echo "$_check" | jq -r '.rows[0].value.rev // empty')
-      local _next_del=$(echo "$_check" | jq -r '.rows[0].value.deleted // empty')
-      local _next_doc_null=$(echo "$_check" | jq -r 'if .rows[0].doc == null then "true" else "false" end')
-      if [[ -z "$_next_rev" ]]; then
-        break  # Fully purged
-      elif [[ "$_next_del" == "true" || "$_next_doc_null" == "true" ]]; then
-        _ts_rev="$_next_rev"  # More tombstone/ghost layers
-      else
-        break  # Real doc exists
-      fi
-    done
-    # Re-check after purge — may still have non-tombstone conflict branches
-    existing=$(curl_get_doc "$base_url" "$doc_id_lower" "$USERNAME" "$PASSWORD")
-  fi
-
   if echo "$existing" | jq -e '.success == false and .error == "not_found"' >/dev/null 2>&1; then
     # Doc doesn't exist — INSERT
     local node_result=$(curl_insert_node "$base_url" "$node_id" "$encoded" "$USERNAME" "$PASSWORD")
-    echo "$node_result" | jq -e '.error' >/dev/null 2>&1 && { echo "$node_result"; return 1; }
+    has_error "$node_result" && { echo "$node_result"; return 1; }
 
     local timestamp=$(date +%s)000
     local doc_json=$(build_doc_json_for_insert "$DOC_ID" "$node_id" "$timestamp" "$content")
     local result=$(curl_insert_doc "$base_url" "$DOC_ID" "$doc_json" "$USERNAME" "$PASSWORD")
     parse_response "$result"
-  elif echo "$existing" | jq -e '.deleted == true' >/dev/null 2>&1; then
+  elif is_deleted "$existing"; then
     # Doc is LiveSync-deleted — re-insert by updating over the deleted doc
     local node_result=$(curl_insert_node "$base_url" "$node_id" "$encoded" "$USERNAME" "$PASSWORD")
-    echo "$node_result" | jq -e '.error' >/dev/null 2>&1 && { echo "$node_result"; return 1; }
+    has_error "$node_result" && { echo "$node_result"; return 1; }
 
     local current_rev=$(echo "$existing" | jq -r '._rev')
     local timestamp=$(date +%s)000
@@ -565,25 +484,31 @@ cmd_select() {
   local base_url="$BASE_URL"
 
   if [[ -n "${DOC_ID:-}" ]]; then
-    local doc_id_lower=$(echo "$DOC_ID" | tr '[:upper:]' '[:lower:]')
+    local doc_id_lower=$(to_lower "$DOC_ID")
     local result=$(curl_get_doc "$base_url" "$doc_id_lower" "$USERNAME" "$PASSWORD")
-    echo "$result" | jq -e '.error' >/dev/null 2>&1 && { echo "$result"; return 1; }
+    has_error "$result" && { echo "$result"; return 1; }
     # Treat LiveSync-deleted documents as not found
-    echo "$result" | jq -e '.deleted == true' >/dev/null 2>&1 && \
+    is_deleted "$result" && \
       { echo '{"success":false,"error":"not_found","reason":null}'; return 1; }
     local full_content=$(resolve_full_content "$result" "$base_url" "$USERNAME" "$PASSWORD")
     format_select_result "$result" "$full_content"
   elif [[ -n "${LIST_DIR:-}" ]]; then
+    local list_raw
     if [[ "$LIST_DIR" == "/" ]]; then
-      format_dir_listing "$(curl_list_all "$base_url" "$USERNAME" "$PASSWORD")" ""
+      list_raw=$(curl_list_dir "$base_url" "" "$USERNAME" "$PASSWORD")
     else
-      format_dir_listing "$(curl_list_dir "$base_url" "$LIST_DIR" "$USERNAME" "$PASSWORD")" "$LIST_DIR"
+      list_raw=$(curl_list_dir "$base_url" "$LIST_DIR" "$USERNAME" "$PASSWORD")
     fi
+    has_error "$list_raw" && { echo "$list_raw"; return 1; }
+    format_dir_listing "$list_raw" "$LIST_DIR"
   elif [[ -n "${CHANGES_LIMIT:-}" ]]; then
     if [[ ! "$CHANGES_LIMIT" =~ ^[0-9]+$ ]]; then
       echo '{"success":false,"error":"invalid_parameter","reason":"--changes requires a positive integer"}'; return 1
     fi
-    format_changes_result "$(curl_changes "$base_url" "$CHANGES_LIMIT" "$USERNAME" "$PASSWORD")"
+    local changes_raw
+    changes_raw=$(curl_changes "$base_url" "$CHANGES_LIMIT" "$USERNAME" "$PASSWORD")
+    has_error "$changes_raw" && { echo "$changes_raw"; return 1; }
+    format_changes_result "$changes_raw"
   else
     echo '{"success":false,"error":"missing_query","reason":"Provide --doc-id, --list-dir, or --changes"}'; return 1
   fi
@@ -594,13 +519,13 @@ _cmd_update_inner() {
   [[ -z "${DOC_ID:-}" ]] && { echo '{"success":false,"error":"missing_doc_id"}'; return 1; }
 
   local base_url="$BASE_URL"
-  local doc_id_lower=$(echo "$DOC_ID" | tr '[:upper:]' '[:lower:]')
+  local doc_id_lower=$(to_lower "$DOC_ID")
 
   local current=$(curl_get_doc "$base_url" "$doc_id_lower" "$USERNAME" "$PASSWORD")
-  echo "$current" | jq -e '.error' >/dev/null 2>&1 && \
+  has_error "$current" && \
     { echo '{"success":false,"error":"doc_not_found"}'; return 1; }
   # Treat LiveSync-deleted documents as not found for UPDATE
-  echo "$current" | jq -e '.deleted == true' >/dev/null 2>&1 && \
+  is_deleted "$current" && \
     { echo '{"success":false,"error":"doc_not_found"}'; return 1; }
 
   local current_rev=$(echo "$current" | jq -r '._rev')
@@ -611,11 +536,16 @@ _cmd_update_inner() {
 
   # Resolve content based on mode
   if [[ -n "${FILE_PATH:-}" ]]; then
-    content_for_chunk=$(read_file_content "$FILE_PATH") || return 1
+    if [[ -f "$FILE_PATH" ]]; then
+      content_for_chunk=$(cat "$FILE_PATH")
+    else
+      echo '{"success":false,"error":"file_not_found","reason":"'"$FILE_PATH"'"}' >&2; return 1
+    fi
   elif [[ "${APPEND_MODE}" == "true" && -n "${CONTENT:-}" ]]; then
     content_for_chunk="$CONTENT"
   elif [[ -n "${REPLACE_SECTION:-}" && -n "${CONTENT:-}" ]]; then
-    local cur_content=$(resolve_full_content "$current" "$base_url" "$USERNAME" "$PASSWORD")
+    local cur_content
+    cur_content=$(resolve_full_content "$current" "$base_url" "$USERNAME" "$PASSWORD")
     content_for_chunk=$(replace_section "$cur_content" "$REPLACE_SECTION" "$CONTENT")
   elif [[ "${CONTENT_SET}" == "true" ]]; then
     content_for_chunk="$CONTENT"
@@ -636,7 +566,7 @@ _cmd_update_inner() {
   fi
 
   local node_result=$(curl_insert_node "$base_url" "$new_node" "$(encode_content_json "$content_for_chunk")" "$USERNAME" "$PASSWORD")
-  echo "$node_result" | jq -e '.error' >/dev/null 2>&1 && { echo "$node_result"; return 1; }
+  has_error "$node_result" && { echo "$node_result"; return 1; }
 
   local updated=$(build_doc_json_for_update "$current" "$final_children" "$(date +%s)000" "$new_size_bytes")
   parse_response "$(curl_update_doc "$base_url" "$doc_id_lower" "$current_rev" "$updated" "$USERNAME" "$PASSWORD")"
@@ -656,46 +586,30 @@ cmd_delete() {
   local base_url="$BASE_URL"
 
   if [[ -n "${DELETE_DIR:-}" ]]; then
-    local list_result=$(curl_list_dir "$base_url" "$DELETE_DIR" "$USERNAME" "$PASSWORD")
+    local list_raw
+    list_raw=$(curl_list_dir "$base_url" "$DELETE_DIR" "$USERNAME" "$PASSWORD")
+    has_error "$list_raw" && { echo "$list_raw"; return 1; }
     local count=0
     local doc_ids
-    if [[ "${PURGE_MODE}" == "true" ]]; then
-      # Purge mode: process ALL docs including LiveSync-deleted ones
-      doc_ids=$(echo "$list_result" | jq -r '.rows[].id' 2>/dev/null)
-    else
-      # Soft delete: only process docs not already LiveSync-deleted
-      doc_ids=$(echo "$list_result" | jq -r '.rows[] | select(.doc.deleted != true) | .id' 2>/dev/null)
-    fi
+    doc_ids=$(echo "$list_raw" | jq -r '.rows[] | select(.doc.deleted != true) | .id' 2>/dev/null)
     for doc_id in $doc_ids; do
       local doc=$(curl_get_doc "$base_url" "$doc_id" "$USERNAME" "$PASSWORD")
-      if [[ "${PURGE_MODE}" == "true" ]]; then
-        cleanup_leaf_nodes "$base_url" "$doc" "$USERNAME" "$PASSWORD"
-        local rev=$(echo "$doc" | jq -r '._rev')
-        curl_delete_doc_purge "$base_url" "$doc_id" "$rev" "$USERNAME" "$PASSWORD" >/dev/null
-      else
-        # Soft delete: do NOT clean up leaf nodes (matches LiveSync behavior)
-        curl_delete_doc_soft "$base_url" "$doc_id" "$doc" "$USERNAME" "$PASSWORD" >/dev/null
-      fi
+      # Soft delete: do NOT clean up leaf nodes (matches LiveSync behavior)
+      curl_delete_doc_soft "$base_url" "$doc_id" "$doc" "$USERNAME" "$PASSWORD" >/dev/null
       count=$((count + 1))
     done
     jq -c -n --arg c "$count" --arg d "$DELETE_DIR" '{success:true,directory:$d,deleted_count:($c|tonumber)}'
 
   elif [[ -n "${DOC_ID:-}" ]]; then
-    local doc_id_lower=$(echo "$DOC_ID" | tr '[:upper:]' '[:lower:]')
+    local doc_id_lower=$(to_lower "$DOC_ID")
     local doc=$(curl_get_doc "$base_url" "$doc_id_lower" "$USERNAME" "$PASSWORD")
-    echo "$doc" | jq -e '.error' >/dev/null 2>&1 && { echo '{"success":false,"error":"not_found"}'; return 1; }
-    local rev=$(echo "$doc" | jq -r '._rev')
-    if [[ "${PURGE_MODE}" == "true" ]]; then
-      cleanup_leaf_nodes "$base_url" "$doc" "$USERNAME" "$PASSWORD"
-      curl_delete_doc_purge "$base_url" "$doc_id_lower" "$rev" "$USERNAME" "$PASSWORD"
-    else
-      # Check if already LiveSync-deleted
-      if echo "$doc" | jq -e '.deleted == true' >/dev/null 2>&1; then
-        echo '{"success":false,"error":"not_found"}'; return 1
-      fi
-      # Soft delete: do NOT clean up leaf nodes (matches LiveSync behavior)
-      parse_response "$(curl_delete_doc_soft "$base_url" "$doc_id_lower" "$doc" "$USERNAME" "$PASSWORD")"
+    has_error "$doc" && { echo '{"success":false,"error":"not_found"}'; return 1; }
+    # Check if already LiveSync-deleted
+    if is_deleted "$doc"; then
+      echo '{"success":false,"error":"not_found"}'; return 1
     fi
+    # Soft delete: do NOT clean up leaf nodes (matches LiveSync behavior)
+    parse_response "$(curl_delete_doc_soft "$base_url" "$doc_id_lower" "$doc" "$USERNAME" "$PASSWORD")"
   else
     echo '{"success":false,"error":"missing_target"}'; return 1
   fi
@@ -727,7 +641,10 @@ validate_config() {
 validate_connection() {
   merge_config
   validate_config || return $?
-  BASE_URL=$(build_base_url "$DEFAULT_HOST" "${DEFAULT_PATH:-}" "$DEFAULT_DATABASE")
+  # Build base URL inline (was: build_base_url)
+  local url="https://${DEFAULT_HOST}"
+  [[ -n "${DEFAULT_PATH:-}" ]] && url="${url}/${DEFAULT_PATH}"
+  BASE_URL="${url}/${DEFAULT_DATABASE}"
   # Establish Cookie Auth session (avoids per-request PBKDF2 hashing)
   _authenticate "${DEFAULT_HOST}" "$USERNAME" "$PASSWORD" || true
 }
@@ -753,12 +670,9 @@ parse_args() {
       --changes)    CHANGES_LIMIT="$2"; shift 2 ;;
       --append)     APPEND_MODE=true; shift ;;
       --replace-section) REPLACE_SECTION="$2"; shift 2 ;;
-      --purge)      PURGE_MODE=true; shift ;;
       --delete-dir) DELETE_DIR="$2"; shift 2 ;;
-      --verify-ssl) INSECURE=false; shift ;;
       --insecure)   INSECURE=true; shift ;;
       --proxy)      PROXY="$2"; shift 2 ;;
-      --proxy-type) PROXY_TYPE="$2"; shift 2 ;;
       INSERT|SELECT|UPDATE|DELETE|PING) COMMAND="$1"; shift ;;
       -h|--help)    show_help; exit 0 ;;
       *)            echo "Unknown: $1" >&2; exit 1 ;;
@@ -783,9 +697,7 @@ Connection (all commands):
   --path              Hidden path (env: COUCHDB_PATH)
   --database          Database (env: COUCHDB_DATABASE)
   --insecure          Skip SSL certificate verification (default: verify)
-  --verify-ssl        Enable SSL certificate verification (this is the default)
-  --proxy HOST:PORT   Proxy address (CLI only, no env var)
-  --proxy-type TYPE   Proxy type: socks5 (default) or http
+  --proxy PROXY       Proxy with scheme, e.g. socks5://host:port or http://host:port
 
 INSERT:
   --doc-id ID         Document path (e.g. AgentMemory/note.md)
@@ -807,7 +719,6 @@ UPDATE:
 DELETE:
   --doc-id ID         Delete a single document
   --delete-dir DIR    Delete all docs in directory
-  --purge             Permanently delete (remove history + leaf nodes)
 EOF
 }
 

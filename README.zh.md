@@ -33,18 +33,16 @@
 | `COUCHDB_DATABASE` | `--database` | 是 | 数据库名称，如 `obsinote` |
 | `COUCHDB_PATH` | `--path` | 否 | 隐藏路径前缀，如 `/e=_9f3k2a` |
 
-### 代理（仅 CLI）
+### 代理与 SSL（仅 CLI）
 
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `--proxy` | 无 | 代理地址，格式 `host:port` |
-| `--proxy-type` | socks5 | 代理类型：`socks5` 或 `http` |
-| `--insecure` | 关闭 | 跳过 SSL 证书验证 |
-| `--verify-ssl` | 开启 | 启用 SSL 证书验证（默认） |
+| 参数 | 说明 |
+|---|---|
+| `--proxy` | 代理地址，需带协议前缀：`socks5://host:port` 或 `http://host:port` |
+| `--insecure` | 跳过 SSL 证书验证（默认：验证） |
 
 ```bash
-bash scripts/couchdb.sh PING --proxy 127.0.0.1:12080
-bash scripts/couchdb.sh PING --proxy proxy.corp.com:8080 --proxy-type http
+bash scripts/couchdb.sh PING --proxy socks5://127.0.0.1:12080
+bash scripts/couchdb.sh PING --proxy http://proxy.corp.com:8080
 ```
 
 ## 使用方法
@@ -95,11 +93,8 @@ bash scripts/couchdb.sh UPDATE --doc-id "Notes/hello.md" --replace-section "## �
 ### 删除文档
 
 ```bash
-# 软删除（标准 Obsidian 行为，保留历史）
+# 软删除（标准 Obsidian 行为，同步到客户端）
 bash scripts/couchdb.sh DELETE --doc-id "Notes/hello.md"
-
-# 永久删除（不可逆）
-bash scripts/couchdb.sh DELETE --doc-id "Notes/hello.md" --purge
 
 # 删除整个目录
 bash scripts/couchdb.sh DELETE --delete-dir "Notes/temp"
@@ -114,6 +109,7 @@ bash scripts/couchdb.sh DELETE --delete-dir "Notes/temp"
 - `--database` 为所有命令的**必填参数**。缺少时脚本返回 `{"success":false,"error":"missing_database"}`。
 - 网络不可达时，脚本返回结构化 JSON 错误（如 `{"success":false,"error":"connection_failed","reason":"Connection timed out"}`），而非静默失败。
 - SSL 证书验证**默认启用**。使用 `--insecure` 跳过验证（例如自签名证书场景）。
+- 所有 DELETE 操作均为**软删除**（LiveSync 兼容的 `deleted:true`），确保 Obsidian 客户端能正确同步删除操作。
 
 ## 许可证
 
